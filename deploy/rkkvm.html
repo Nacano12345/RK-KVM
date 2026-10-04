@@ -343,17 +343,19 @@ async function setActive(on){
   if(on){ if(!document.fullscreenElement){try{await(wrap.requestFullscreen?wrap.requestFullscreen({navigationUI:'hide'}):Promise.resolve());}catch(e){}}
     if(keylockChk.checked)await setKeyLock(true);
     if(mode==='rel'){cv.focus();cv.requestPointerLock();} }
-  else { setKeyLock(false); if(document.pointerLockElement)document.exitPointerLock(); }
+  else { setKeyLock(false); physMod=0; updateInds(); if(document.pointerLockElement)document.exitPointerLock(); }
 }
 ctrl.addEventListener('click',()=>setActive(!active));
 document.addEventListener('pointerlockchange',()=>{ if(mode==='rel'&&active&&document.pointerLockElement!==cv)setActive(false); });
 document.addEventListener('contextmenu',e=>e.preventDefault());
 addEventListener('keydown',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
-  if(e.code==='CapsLock'){capsOn=!capsOn;updateInds();}
-  if(e.code==='NumLock'){numOn=!numOn;updateInds();}
+  if(e.code==='CapsLock')capsOn=!capsOn;
+  if(e.code==='NumLock')numOn=!numOn;
+  physMod=modMask(e); updateInds();
   if(e.repeat)return;
   const c=KMAP[e.code]; if(c)hid('kd '+modMask(e)+' '+c); else hid('km '+modMask(e)); },true);
 addEventListener('keyup',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
+  physMod=modMask(e); updateInds();
   const c=KMAP[e.code]; if(c)hid('ku '+modMask(e)+' '+c); else hid('km '+modMask(e)); },true);
 
 const tap=(mod,key)=>{ hid('kd '+mod+' '+key); setTimeout(()=>hid('ku '+mod+' '+key),45); };
@@ -426,18 +428,20 @@ function build(rows, parent){
 }
 build(Main,vkmain); build(Side,vkside);
 
-let vkbMod=0, capsOn=false, numOn=false;
+let vkbMod=0, physMod=0, capsOn=false, numOn=false;
 const indCaps=document.getElementById('indCaps'), indNum=document.getElementById('indNum');
 const indCtrl=document.getElementById('indCtrl'), indShift=document.getElementById('indShift'),
       indAlt=document.getElementById('indAlt'), indWin=document.getElementById('indWin');
 function updateInds(){
+  const mm=vkbMod|physMod;
   indCaps.classList.toggle('on',capsOn);
   indNum.classList.toggle('on',numOn);
-  indCtrl.classList.toggle('on',(vkbMod&1)!==0);
-  indShift.classList.toggle('on',(vkbMod&2)!==0);
-  indAlt.classList.toggle('on',(vkbMod&4)!==0);
-  indWin.classList.toggle('on',(vkbMod&8)!==0);
+  indCtrl.classList.toggle('on',(mm&1)!==0);
+  indShift.classList.toggle('on',(mm&2)!==0);
+  indAlt.classList.toggle('on',(mm&4)!==0);
+  indWin.classList.toggle('on',(mm&8)!==0);
 }
+addEventListener('blur',()=>{ physMod=0; updateInds(); });
 function clearMods(){ vkbMod=0; document.querySelectorAll('#vkb button.mod').forEach(x=>x.classList.remove('mod-on')); updateInds(); }
 document.getElementById('kbToggle').addEventListener('click',()=>{ vkb.style.display=(vkb.style.display==='flex')?'none':'flex'; });
 document.getElementById('vkbHide').addEventListener('click',()=>{ vkb.style.display='none'; });
