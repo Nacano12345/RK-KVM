@@ -55,14 +55,22 @@
   .rng span{width:34px;opacity:.75}
   .rng b{width:34px;text-align:right;opacity:.8;font-weight:400}
   .muted{font-size:12px;opacity:.65}
-  /* virtual keyboard */
-  #vkb{position:fixed;left:0;right:0;bottom:0;background:rgba(17,17,21,.98);
-    border-top:1px solid var(--line);display:none;flex-direction:column;z-index:28;max-height:62vh}
-  .vkhead{display:flex;align-items:center;gap:10px;padding:6px 10px;border-bottom:1px solid var(--line);
-    font-size:13px;color:var(--accent)}
+  /* virtual keyboard (floating, draggable) */
+  #vkb{position:fixed;left:10px;top:60px;display:none;flex-direction:column;z-index:40;
+    background:rgba(17,17,21,.96);border:1px solid var(--line);border-radius:10px;
+    box-shadow:0 12px 40px rgba(0,0,0,.6);width:max-content;max-width:96vw;max-height:78vh}
+  .vkhead{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);
+    font-size:13px;color:var(--accent);cursor:move;touch-action:none;user-select:none}
+  .vkhead .grip{opacity:.5}
   .vkhead .sp{flex:1}
   .vkhead button{background:#22222a;border:1px solid #333;color:#ddd;border-radius:6px;padding:4px 10px;cursor:pointer}
-  .vkbody{display:flex;gap:12px;padding:8px 10px;overflow:auto;justify-content:center}
+  .vkhead .opac{display:flex;align-items:center;gap:4px;font-size:12px;color:#aaa;cursor:default}
+  .vkhead .opac input{width:80px}
+  .inds{display:flex;gap:5px;margin-left:6px}
+  .ind{font-size:10.5px;padding:2px 6px;border-radius:5px;border:1px solid #333;color:#666;background:#0e0e11;letter-spacing:.5px}
+  .ind.on{color:#0b0b0d;background:#39d353;border-color:#39d353;font-weight:700}
+  .ind.mod.on{background:#4ea1ff;border-color:#4ea1ff}
+  .vkbody{display:flex;gap:12px;padding:8px 10px;overflow:auto;justify-content:center;max-width:96vw}
   .vkmain,.vkside{display:flex;flex-direction:column;gap:5px}
   .vkrow{display:flex;gap:5px}
   .vk{background:#22222a;border:1px solid #333;color:#ddd;border-radius:7px;
@@ -158,9 +166,19 @@
 </main>
 
 <div id="vkb">
-  <div class="vkhead">
-    <span>虚拟键盘</span><span class="muted">修饰键粘滞：点 Ctrl/Shift/Alt/Win 后按下一个键即生效并自动释放</span>
+  <div class="vkhead" id="vkbHead">
+    <span class="grip" title="拖动">⠿</span>
+    <span>虚拟键盘</span>
+    <span class="inds">
+      <span class="ind" id="indCaps">CAPS</span>
+      <span class="ind" id="indNum">NUM</span>
+      <span class="ind mod" id="indCtrl">CTRL</span>
+      <span class="ind mod" id="indShift">SHF</span>
+      <span class="ind mod" id="indAlt">ALT</span>
+      <span class="ind mod" id="indWin">WIN</span>
+    </span>
     <span class="sp"></span>
+    <label class="opac" title="透明度">透明<input type="range" id="vkbOpac" min="30" max="100" value="100"></label>
     <button id="vkbHide">收起 ▾</button>
   </div>
   <div class="vkbody">
@@ -330,7 +348,10 @@ async function setActive(on){
 ctrl.addEventListener('click',()=>setActive(!active));
 document.addEventListener('pointerlockchange',()=>{ if(mode==='rel'&&active&&document.pointerLockElement!==cv)setActive(false); });
 document.addEventListener('contextmenu',e=>e.preventDefault());
-addEventListener('keydown',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation(); if(e.repeat)return;
+addEventListener('keydown',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
+  if(e.code==='CapsLock'){capsOn=!capsOn;updateInds();}
+  if(e.code==='NumLock'){numOn=!numOn;updateInds();}
+  if(e.repeat)return;
   const c=KMAP[e.code]; if(c)hid('kd '+modMask(e)+' '+c); else hid('km '+modMask(e)); },true);
 addEventListener('keyup',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
   const c=KMAP[e.code]; if(c)hid('ku '+modMask(e)+' '+c); else hid('km '+modMask(e)); },true);
@@ -405,16 +426,57 @@ function build(rows, parent){
 }
 build(Main,vkmain); build(Side,vkside);
 
-let vkbMod=0;
-function clearMods(){ vkbMod=0; document.querySelectorAll('#vkb button.mod').forEach(x=>x.classList.remove('mod-on')); }
+let vkbMod=0, capsOn=false, numOn=false;
+const indCaps=document.getElementById('indCaps'), indNum=document.getElementById('indNum');
+const indCtrl=document.getElementById('indCtrl'), indShift=document.getElementById('indShift'),
+      indAlt=document.getElementById('indAlt'), indWin=document.getElementById('indWin');
+function updateInds(){
+  indCaps.classList.toggle('on',capsOn);
+  indNum.classList.toggle('on',numOn);
+  indCtrl.classList.toggle('on',(vkbMod&1)!==0);
+  indShift.classList.toggle('on',(vkbMod&2)!==0);
+  indAlt.classList.toggle('on',(vkbMod&4)!==0);
+  indWin.classList.toggle('on',(vkbMod&8)!==0);
+}
+function clearMods(){ vkbMod=0; document.querySelectorAll('#vkb button.mod').forEach(x=>x.classList.remove('mod-on')); updateInds(); }
 document.getElementById('kbToggle').addEventListener('click',()=>{ vkb.style.display=(vkb.style.display==='flex')?'none':'flex'; });
 document.getElementById('vkbHide').addEventListener('click',()=>{ vkb.style.display='none'; });
 vkb.addEventListener('click',e=>{
   const b=e.target.closest('button.vk'); if(!b)return;
-  if(b.dataset.mod!=null){ const m=+b.dataset.mod; vkbMod^=m; b.classList.toggle('mod-on',(vkbMod&m)!==0); return; }
+  if(b.dataset.mod!=null){ const m=+b.dataset.mod; vkbMod^=m; b.classList.toggle('mod-on',(vkbMod&m)!==0); updateInds(); return; }
   if(b.dataset.cons){ hid('c '+b.dataset.cons); return; }
-  if(b.dataset.code){ const u=KMAP[b.dataset.code]; if(u){ hid('k '+vkbMod+' '+u); clearMods(); } }
+  if(b.dataset.code){ const u=KMAP[b.dataset.code]; if(u){
+    hid('k '+vkbMod+' '+u);
+    if(b.dataset.code==='CapsLock')capsOn=!capsOn;
+    if(b.dataset.code==='NumLock')numOn=!numOn;
+    clearMods(); } }
 });
+updateInds();
+
+// drag + opacity + persistence
+const vkbHead=document.getElementById('vkbHead');
+let vkDrag=null;
+vkbHead.addEventListener('pointerdown',e=>{
+  if(e.target.closest('button,input,label'))return;
+  vkDrag={dx:e.clientX-vkb.offsetLeft, dy:e.clientY-vkb.offsetTop};
+  try{vkbHead.setPointerCapture(e.pointerId);}catch(_){}
+});
+vkbHead.addEventListener('pointermove',e=>{ if(!vkDrag)return;
+  let x=Math.max(0,Math.min(e.clientX-vkDrag.dx, innerWidth-vkb.offsetWidth));
+  let y=Math.max(44,Math.min(e.clientY-vkDrag.dy, innerHeight-40));
+  vkb.style.left=x+'px'; vkb.style.top=y+'px';
+});
+vkbHead.addEventListener('pointerup',()=>{ if(!vkDrag)return; vkDrag=null; persistVkb(); });
+const vkbOpac=document.getElementById('vkbOpac');
+vkbOpac.addEventListener('input',()=>{ vkb.style.opacity=(+vkbOpac.value)/100; });
+vkbOpac.addEventListener('change',persistVkb);
+function persistVkb(){ try{ localStorage.setItem('vkb',
+  JSON.stringify({x:vkb.offsetLeft,y:vkb.offsetTop,o:+vkbOpac.value})); }catch(_){ } }
+(function loadVkb(){ try{ const s=JSON.parse(localStorage.getItem('vkb')||'{}');
+  if(s.x!=null)vkb.style.left=s.x+'px';
+  if(s.y!=null)vkb.style.top=s.y+'px';
+  if(s.o!=null){ vkbOpac.value=s.o; vkb.style.opacity=s.o/100; }
+}catch(_){ } })();
 </script>
 </body>
 </html>
