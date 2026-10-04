@@ -1,0 +1,25 @@
+# large third-party / build outputs (not committed)
+/toolchain/
+/dl/
+/build/
+*.o
+*.a
+*.so
+*.deb
+*.tar
+*.tar.*
+*.tgz
+*.zip
+*.rar
+*.xz
+
+# compiled binaries (produced by build.sh)
+/src/rkkvm-hid
+/src/rkkvm-video
+/src/gpioscan
+/src/hello
+
+# device runtime secrets
+/passwd
+deploy/passwd
+*.bak

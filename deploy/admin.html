@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>维护后台 · RK-KVM</title>
+<style>
+  html,body{margin:0;background:#0b0b0d;color:#ddd;font-family:ui-monospace,Consolas,monospace}
+  #bar{display:flex;gap:10px;align-items:center;padding:8px 12px;background:#16161a;
+    border-bottom:1px solid #26262c;font-size:14px}
+  #bar b{color:#4ea1ff;font-family:system-ui}
+  #bar a{color:#9cf;text-decoration:none}
+  #bar a:hover{text-decoration:underline}
+  .sp{flex:1}
+  .wrap{display:flex;height:calc(100% - 41px);min-height:0}
+  .left{flex:1.4;display:flex;flex-direction:column;padding:10px;min-width:0}
+  .right{width:300px;border-left:1px solid #26262c;padding:10px;overflow:auto}
+  textarea{width:100%;box-sizing:border-box;background:#0e0e11;color:#eee;border:1px solid #333;
+    border-radius:8px;padding:8px;font:13px ui-monospace,monospace}
+  #cmd{height:70px}
+  #out{flex:1;margin-top:8px;background:#050506;border:1px solid #26262c;border-radius:8px;
+    padding:8px;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:12.5px;color:#cfe}
+  button{background:#2a6df4;color:#fff;border:0;border-radius:6px;padding:6px 10px;
+    font-size:13px;cursor:pointer;font-family:system-ui}
+  button:hover{background:#3d7cf6}
+  .row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
+  .card{background:#121216;border:1px solid #26262c;border-radius:8px;padding:8px;margin-bottom:10px}
+  .card h4{margin:0 0 6px;font-size:13px;color:#8bd;font-family:system-ui}
+  input,select{background:#0e0e11;color:#eee;border:1px solid #333;border-radius:6px;padding:6px;font-size:13px;width:100%;box-sizing:border-box;margin:4px 0}
+</style>
+</head>
+<body>
+<div id="bar">
+  <b>RK-KVM 维护后台</b>
+  <span>root@RK3506</span>
+  <a href="/">← 返回 KVM</a>
+  <a href="/logout" onclick="return confirm('退出登录？')">退出</a>
+  <span class="sp"></span>
+  <span id="who" style="opacity:.7"></span>
+</div>
+<div class="wrap">
+  <div class="left">
+    <textarea id="cmd" spellcheck="false" placeholder="输入 shell 命令（root 权限）…例如： cat /userdata/kvm.conf"></textarea>
+    <div class="row">
+      <button onclick="run()">执行</button>
+      <button onclick="run('uptime; free; df -h')">系统信息</button>
+      <button onclick="run('ps | head -40')">进程</button>
+      <button onclick="run('cat /userdata/kvm.conf')">查看KVM配置</button>
+      <button onclick="run('/etc/init.d/S52rkkvm-video.sh restart; cat /var/log/rkkvm-video.log | tail -5')">重启视频</button>
+      <button onclick="run('/etc/init.d/S51rkkvm-hid.sh restart')">重启HID</button>
+      <button onclick="run('ip -brief addr; ip route')">网络</button>
+      <button onclick="run('cat /var/log/rkkvm-hid.log | tail -10')">HID日志</button>
+    </div>
+    <pre id="out">点“执行”或上面的快捷按钮。</pre>
+  </div>
+  <div class="right">
+    <div class="card">
+      <h4>修改密码</h4>
+      <input id="oldp" type="password" placeholder="当前密码">
+      <input id="newp" type="password" placeholder="新密码（≥4位）">
+      <button onclick="chpass()">修改</button>
+      <div id="pmsg" style="font-size:12px;color:#8f8;min-height:16px;margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <h4>KVM 跳线 GPIO</h4>
+      <label style="font-size:12px">电源脚</label><input id="pg" type="number">
+      <label style="font-size:12px">复位脚</label><input id="rg" type="number">
+      <label style="font-size:12px">状态脚(-1关)</label><input id="sg" type="number">
+      <button onclick="savegpio()">保存</button>
+      <div id="gmsg" style="font-size:12px;color:#8f8;min-height:16px;margin-top:6px"></div>
+    </div>
+    <div class="card">
+      <h4>危险操作</h4>
+      <div class="row">
+        <button style="background:#7a2" onclick="run('sync; reboot')">重启系统</button>
+        <button style="background:#a33" onclick="if(confirm('关机？'))run('poweroff')">关机</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+async function run(cmd){
+  const el=document.getElementById('cmd');
+  if(cmd!==undefined) el.value=cmd;
+  const c=el.value.trim(); if(!c) return;
+  const out=document.getElementById('out'); out.textContent='执行中…';
+  try{
+    const r=await fetch('/admin/exec',{method:'POST',
+      headers:{'Content-Type':'application/x-www-form-urlencoded'},
+      body:'cmd='+encodeURIComponent(c)});
+    out.textContent = await r.text();
+    out.scrollTop=0;
+  }catch(e){ out.textContent='执行失败: '+e; }
+}
+async function chpass(){
+  const o=document.getElementById('oldp').value, n=document.getElementById('newp').value;
+  const m=document.getElementById('pmsg');
+  const r=await fetch('/passwd',{method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},
+    body:'old='+encodeURIComponent(o)+'&new='+encodeURIComponent(n)});
+  m.textContent = (await r.text())==='ok' ? '修改成功' : '失败（原密码错误或新密码过短）';
+}
+async function loadStatus(){
+  try{
+    const t=await (await fetch('/status')).text();
+    const m=t.match(/pgpio=(-?\d+), rgpio=(-?\d+), sgpio=(-?\d+)/);
+    if(m){ document.getElementById('pg').value=m[1]; document.getElementById('rg').value=m[2]; document.getElementById('sg').value=m[3]; }
+  }catch(e){}
+}
+async function savegpio(){
+  const p=+document.getElementById('pg').value, r=+document.getElementById('rg').value, s=+document.getElementById('sg').value;
+  await fetch(`/gpiocfg?power=${p}&reset=${r}&status=${s}`);
+  document.getElementById('gmsg').textContent='已保存';
+  setTimeout(()=>document.getElementById('gmsg').textContent='',1500);
+}
+loadStatus();
+</script>
+</body>
+</html>

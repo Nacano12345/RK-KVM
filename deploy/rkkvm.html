@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RK-KVM</title>
+<style>
+  :root{--bg:#0b0b0d;--panel:#15151a;--line:#26262c;--accent:#4ea1ff;--txt:#ddd}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--txt);
+    font-family:system-ui,sans-serif;overflow:hidden;-webkit-user-select:none;user-select:none}
+  /* top bar */
+  #top{height:44px;display:flex;align-items:center;gap:12px;padding:0 12px;
+    background:var(--panel);border-bottom:1px solid var(--line);position:relative;z-index:30}
+  #top .brand{font-size:16px;font-weight:700;color:var(--accent);letter-spacing:1px}
+  #menu{background:#22222a;border:1px solid #333;color:#ddd;border-radius:8px;
+    width:38px;height:30px;font-size:16px;cursor:pointer}
+  #menu:hover{background:#2c2c36}
+  #status{opacity:.7;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    max-width:44vw}
+  .dot{width:8px;height:8px;border-radius:50%;background:#c33;display:inline-block;flex:0 0 auto}
+  .dot.on{background:#2ecc71}
+  .sp{flex:1}
+  #top a{color:#9cf;text-decoration:none;font-size:13px}
+  #top a:hover{text-decoration:underline}
+  /* stage */
+  #wrap{height:calc(100% - 45px);display:flex;align-items:center;justify-content:center;
+    background:#000;position:relative}
+  #view{max-width:100%;max-height:100%;cursor:crosshair;outline:none}
+  #stream{position:absolute;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none}
+  #hint{position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+    background:rgba(0,0,0,.6);padding:5px 12px;border-radius:6px;font-size:12px;
+    opacity:.8;pointer-events:none;max-width:94%;text-align:center}
+  /* drawer */
+  #drawer{position:fixed;top:44px;left:0;bottom:0;width:300px;background:var(--panel);
+    border-right:1px solid var(--line);transform:translateX(-100%);transition:transform .2s;
+    z-index:25;overflow-y:auto;padding:10px 12px 20px}
+  body.open #drawer{transform:translateX(0)}
+  #backdrop{position:fixed;inset:44px 0 0 0;background:rgba(0,0,0,.45);display:none;z-index:20}
+  body.open #backdrop{display:block}
+  details{border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:#121216}
+  details>summary{cursor:pointer;padding:9px 10px;font-size:13px;font-weight:600;color:var(--accent);
+    list-style:none;display:flex;align-items:center;justify-content:space-between}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary:after{content:"▾";opacity:.6}
+  details[open]>summary:after{content:"▴"}
+  .sec{padding:6px 10px 10px}
+  .grp{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:6px 0}
+  .grp label{font-size:12px;opacity:.85;min-width:34px}
+  select{background:#22222a;color:#ddd;border:1px solid #333;border-radius:6px;padding:5px}
+  input[type=number]{background:#0e0e11;color:#eee;border:1px solid #333;border-radius:6px;
+    padding:5px;width:60px}
+  input[type=range]{width:150px}
+  button{background:#2a6df4;color:#fff;border:0;border-radius:6px;padding:6px 10px;
+    font-size:13px;cursor:pointer}
+  button:hover{filter:brightness(1.15)}
+  button.off{background:#444}
+  button.gray{background:#333}
+  button.danger{background:#a33}
+  .rng{display:flex;align-items:center;gap:6px;margin:4px 0;font-size:12px}
+  .rng span{width:34px;opacity:.75}
+  .rng b{width:34px;text-align:right;opacity:.8;font-weight:400}
+  .muted{font-size:12px;opacity:.65}
+</style>
+</head>
+<body>
+<header id="top">
+  <button id="menu" title="菜单">☰</button>
+  <span class="brand">RK-KVM</span>
+  <span><span id="wsdot" class="dot"></span></span>
+  <span id="status">连接中…</span>
+  <span class="sp"></span>
+  <a href="/admin">后台</a>
+  <a href="/logout" onclick="return confirm('退出登录？')">退出</a>
+</header>
+
+<div id="backdrop"></div>
+
+<aside id="drawer">
+  <details open>
+    <summary>控制</summary>
+    <div class="sec">
+      <div class="grp"><button id="ctrl" class="off">启用控制</button></div>
+      <div class="grp"><label>鼠标</label>
+        <select id="mode"><option value="abs" selected>绝对(跟随)</option><option value="rel">相对(锁定)</option></select>
+      </div>
+      <div class="grp"><button id="fs" class="gray">全屏</button>
+        <label style="min-width:0"><input type="checkbox" id="keylock"> 全键捕获</label></div>
+    </div>
+  </details>
+
+  <details open>
+    <summary>画质</summary>
+    <div class="sec">
+      <div class="grp"><label>分辨率</label><select id="res"></select></div>
+      <div class="grp"><label>帧率</label><select id="fps"></select></div>
+      <div class="grp"><label>编码</label>
+        <select id="enc"><option value="0" selected>直通</option><option value="1">压缩(软编)</option></select>
+        <input id="q" type="range" min="20" max="95" value="60" style="display:none;width:110px">
+        <b id="qv" style="font-size:12px"></b>
+      </div>
+    </div>
+  </details>
+
+  <details>
+    <summary>画面对齐</summary>
+    <div class="sec">
+      <div class="grp"><label style="min-width:0"><input type="checkbox" id="autoAlign" checked> 自动对齐</label>
+        <button id="redetect" class="gray">重新对齐</button>
+        <button id="resetAlign" class="gray">重置</button></div>
+      <div class="rng"><span>左</span><input type="range" id="cl" min="0" max="40" value="0"><b id="clv">0%</b></div>
+      <div class="rng"><span>右</span><input type="range" id="cr" min="0" max="40" value="0"><b id="crv">0%</b></div>
+      <div class="rng"><span>上</span><input type="range" id="ct" min="0" max="40" value="0"><b id="ctv">0%</b></div>
+      <div class="rng"><span>下</span><input type="range" id="cb" min="0" max="40" value="0"><b id="cbv">0%</b></div>
+    </div>
+  </details>
+
+  <details>
+    <summary>快捷键</summary>
+    <div class="sec">
+      <div class="grp">
+        <button id="cad" class="gray">Ctrl+Alt+Del</button>
+        <button id="alttab" class="gray">Alt+Tab</button>
+      </div>
+      <div class="muted">这些键被操作系统截获，网页无法直接捕获，故用按钮发送。</div>
+    </div>
+  </details>
+
+  <details>
+    <summary>电源 / 复位</summary>
+    <div class="sec">
+      <div class="grp"><label>电源脚</label><input id="pgpio" type="number" value="22">
+        <button id="power">开机</button><button id="powerHold" class="gray">长按</button></div>
+      <div class="grp"><label>复位脚</label><input id="rgpio" type="number" value="23">
+        <button id="reset" class="gray">复位</button></div>
+      <div class="grp"><label>状态脚</label><input id="sgpio" type="number" value="-1">
+        <span id="pwrind" title="被控机电源状态"><span id="pwrdot" class="dot"></span></span>
+        <button id="savecfg" class="gray">保存</button></div>
+      <div class="muted">J4 排针：pin2=GND，pin3/4=信号(gpio22/23)，经三极管/光耦接被控机电源键/复位键。</div>
+    </div>
+  </details>
+</aside>
+
+<main id="wrap">
+  <canvas id="view" tabindex="0"></canvas>
+  <img id="stream" src="/stream" alt="">
+  <div id="hint">点“启用控制”：绝对模式=鼠标移到画面位置即定位；相对模式=点击锁定指针。Esc 停止</div>
+</main>
+
+<script>
+const cv = document.getElementById('view');
+const ctx = cv.getContext('2d');
+const img = document.getElementById('stream');
+const wrap = document.getElementById('wrap');
+const ctrl = document.getElementById('ctrl');
+const statusEl = document.getElementById('status');
+const wsdot = document.getElementById('wsdot');
+const resSel = document.getElementById('res');
+const fpsSel = document.getElementById('fps');
+const modeSel = document.getElementById('mode');
+const autoAlign = document.getElementById('autoAlign');
+
+// drawer toggle
+const menuBtn=document.getElementById('menu'), backdrop=document.getElementById('backdrop');
+menuBtn.addEventListener('click',()=>document.body.classList.toggle('open'));
+backdrop.addEventListener('click',()=>document.body.classList.remove('open'));
+
+// ---------- WebSocket control ----------
+let ws=null;
+const setWsDot = on => wsdot.className = 'dot' + (on?' on':'');
+function connect(){
+  ws = new WebSocket((location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws');
+  ws.onopen=()=>setWsDot(true);
+  ws.onclose=()=>{ setWsDot(false); setTimeout(connect,1000); };
+  ws.onerror=()=>{};
+}
+connect();
+function hid(cmd){
+  if(ws && ws.readyState===WebSocket.OPEN) ws.send(cmd);
+  else fetch('/api/hid',{method:'POST',body:cmd}).catch(()=>{});
+}
+
+// ---------- formats / bitrate ----------
+let formats=[];
+fetch('/formats').then(r=>r.json()).then(list=>{
+  formats=list;
+  const seen=new Set(); resSel.innerHTML='';
+  list.forEach(m=>{ const k=m.w+'x'+m.h; if(seen.has(k))return; seen.add(k);
+    const o=document.createElement('option'); o.value=k; o.textContent=k; resSel.appendChild(o); });
+  if(seen.has('1280x720')) resSel.value='1280x720';
+  fillFps();
+}).catch(()=>{});
+function fillFps(){
+  const [w,h]=resSel.value.split('x').map(Number);
+  const m=formats.find(f=>f.w===w&&f.h===h);
+  fpsSel.innerHTML='';
+  const fr=(m?m.fps:[30,25,20,15,10]).slice().sort((a,b)=>b-a);
+  fr.forEach(f=>{ const o=document.createElement('option'); o.value=f; o.textContent=f+' fps'; fpsSel.appendChild(o); });
+  fpsSel.value=fr.includes(30)?30:fr[0];
+}
+function applyMode(){
+  const [w,h]=resSel.value.split('x').map(Number);
+  fetch(`/setres?w=${w}&h=${h}&fps=${fpsSel.value}`).catch(()=>{});
+}
+resSel.addEventListener('change', ()=>{ fillFps(); applyMode(); });
+fpsSel.addEventListener('change', applyMode);
+
+// encoding / compression
+const encSel=document.getElementById('enc');
+const qRange=document.getElementById('q');
+const qv=document.getElementById('qv');
+function applyEnc(){
+  const m=+encSel.value;
+  qRange.style.display = m?'':'none';
+  qv.textContent = m? qRange.value:'';
+  fetch(`/setenc?mode=${m}&quality=${qRange.value}`).catch(()=>{});
+}
+encSel.addEventListener('change', applyEnc);
+qRange.addEventListener('input', ()=>{ qv.textContent=qRange.value; });
+qRange.addEventListener('change', applyEnc);
+
+// status poll
+let lastTx=0,lastT=0,cfgLoaded=false;
+function poll(){
+  fetch('/status').then(r=>r.text()).then(t=>{
+    const m=t.match(/tx (\d+)/);
+    if(m){ const now=performance.now(); const tx=+m[1];
+      if(lastT){ const mbps=((tx-lastTx)*8/1e6)/((now-lastT)/1000); lastTx=tx;lastT=now;
+        statusEl.textContent = t.split(',').slice(0,2).join(',').trim()+` | ≈${mbps.toFixed(1)} Mbps `+(t.includes('hid=up')?'| HID✓':'');
+      } else {lastTx=tx;lastT=now;}
+    } else statusEl.textContent=t.trim();
+    const pw=t.match(/pwr=(-?\d+)/), pg=t.match(/pgpio=(-?\d+)/), rg=t.match(/rgpio=(-?\d+)/), sg=t.match(/sgpio=(-?\d+)/);
+    if(pw){ const v=+pw[1]; const d=document.getElementById('pwrdot');
+      if(v===1){ d.className='dot on'; d.style.background=''; }
+      else if(v===0){ d.className='dot'; d.style.background='#c33'; }
+      else { d.className='dot'; d.style.background=''; }
+      document.getElementById('pwrind').title = v<0?'未配置状态脚':(v?'电源：开':'电源：关');
+    }
+    if(!cfgLoaded && pg && rg && sg){ cfgLoaded=true;
+      pgpio.value=pg[1]; rgpio.value=rg[1]; document.getElementById('sgpio').value=sg[1];
+    }
+  }).catch(()=>statusEl.textContent='视频离线');
+}
+poll(); setInterval(poll,2000);
+
+// ---------- crop / auto-align ----------
+let crop={l:0,r:0,t:0,b:0};
+const detectCv=document.createElement('canvas');
+const dctx=detectCv.getContext('2d',{willReadFrequently:true});
+function setCrop(c){ crop=c; syncSliders(); }
+function syncSliders(){
+  document.getElementById('cl').value=Math.round(crop.l*100);
+  document.getElementById('cr').value=Math.round(crop.r*100);
+  document.getElementById('ct').value=Math.round(crop.t*100);
+  document.getElementById('cb').value=Math.round(crop.b*100);
+  clv.textContent=Math.round(crop.l*100)+'%'; crv.textContent=Math.round(crop.r*100)+'%';
+  ctv.textContent=Math.round(crop.t*100)+'%'; cbv.textContent=Math.round(crop.b*100)+'%';
+}
+function detect(){
+  if(!img.naturalWidth) return false;
+  const W=160, H=Math.max(1,Math.round(160*img.naturalHeight/img.naturalWidth));
+  detectCv.width=W; detectCv.height=H;
+  dctx.drawImage(img,0,0,W,H);
+  let d; try{ d=dctx.getImageData(0,0,W,H).data; }catch(e){ return false; }
+  const thr=22; const isBlack=i=>d[i]<thr&&d[i+1]<thr&&d[i+2]<thr;
+  const colFrac=x=>{ let c=0; for(let y=0;y<H;y++) if(!isBlack((y*W+x)*4)) c++; return c/H; };
+  const rowFrac=y=>{ let c=0; for(let x=0;x<W;x++) if(!isBlack((y*W+x)*4)) c++; return c/W; };
+  let L=0,R=W-1,T=0,B=H-1;
+  while(L<W-1 && colFrac(L)<0.06) L++;
+  while(R>L+1 && colFrac(R)<0.06) R--;
+  while(T<H-1 && rowFrac(T)<0.06) T++;
+  while(B>T+1 && rowFrac(B)<0.06) B--;
+  const n={l:L/W, r:1-(R+1)/W, t:T/H, b:1-(B+1)/H};
+  if((1-n.l-n.r)<0.2 || (1-n.t-n.b)<0.2) return false;
+  setCrop(n); return true;
+}
+['cl','cr','ct','cb'].forEach((id,i)=>{
+  document.getElementById(id).addEventListener('input',e=>{
+    const v=+e.target.value/100; const k=['l','r','t','b'][i]; crop[k]=v; syncSliders();
+  });
+});
+document.getElementById('redetect').addEventListener('click',()=>detect());
+document.getElementById('resetAlign').addEventListener('click',()=>setCrop({l:0,r:0,t:0,b:0}));
+setInterval(()=>{ if(autoAlign.checked) detect(); }, 3000);
+setTimeout(detect, 1200);
+
+// ---------- render ----------
+function draw(){
+  if(img.naturalWidth>0){
+    const sw=img.naturalWidth, sh=img.naturalHeight;
+    const sx=Math.round(crop.l*sw), sy=Math.round(crop.t*sh);
+    const cw=Math.max(2,Math.round((1-crop.l-crop.r)*sw));
+    const ch=Math.max(2,Math.round((1-crop.t-crop.b)*sh));
+    const availW=wrap.clientWidth, availH=wrap.clientHeight;
+    const scale=Math.min(availW/cw, availH/ch);
+    const outW=Math.max(1,Math.round(cw*scale)), outH=Math.max(1,Math.round(ch*scale));
+    if(cv.width!==outW||cv.height!==outH){ cv.width=outW; cv.height=outH; }
+    ctx.drawImage(img, sx,sy,cw,ch, 0,0,outW,outH);
+  }
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+// ---------- key map ----------
+const KMAP={KeyA:4,KeyB:5,KeyC:6,KeyD:7,KeyE:8,KeyF:9,KeyG:10,KeyH:11,KeyI:12,KeyJ:13,KeyK:14,KeyL:15,KeyM:16,KeyN:17,KeyO:18,KeyP:19,KeyQ:20,KeyR:21,KeyS:22,KeyT:23,KeyU:24,KeyV:25,KeyW:26,KeyX:27,KeyY:28,KeyZ:29,Digit1:30,Digit2:31,Digit3:32,Digit4:33,Digit5:34,Digit6:35,Digit7:36,Digit8:37,Digit9:38,Digit0:39,Enter:40,Escape:41,Backspace:42,Tab:43,Space:44,Minus:45,Equal:46,BracketLeft:47,BracketRight:48,Backslash:49,Semicolon:51,Quote:52,Backquote:53,Comma:54,Period:55,Slash:56,CapsLock:57,F1:58,F2:59,F3:60,F4:61,F5:62,F6:63,F7:64,F8:65,F9:66,F10:67,F11:68,F12:69,PrintScreen:70,ScrollLock:71,Pause:72,Insert:73,Home:74,PageUp:75,Delete:76,End:77,PageDown:78,ArrowRight:79,ArrowLeft:80,ArrowDown:81,ArrowUp:82,NumLock:83,NumpadDivide:84,NumpadMultiply:85,NumpadSubtract:86,NumpadAdd:87,NumpadEnter:88,Numpad1:89,Numpad2:90,Numpad3:91,Numpad4:92,Numpad5:93,Numpad6:94,Numpad7:95,Numpad8:96,Numpad9:97,Numpad0:98,NumpadDecimal:99,IntlBackslash:100,ContextMenu:101};
+const modMask=e=>(e.ctrlKey?1:0)|(e.shiftKey?2:0)|(e.altKey?4:0)|(e.metaKey?8:0);
+
+let active=false, mode=modeSel.value, btn=0;
+const fsBtn=document.getElementById('fs');
+const keylockChk=document.getElementById('keylock');
+function toggleFs(){
+  if(document.fullscreenElement){ document.exitFullscreen().catch(()=>{}); return; }
+  const p = wrap.requestFullscreen ? wrap.requestFullscreen({navigationUI:'hide'}) :
+            (wrap.webkitRequestFullscreen ? wrap.webkitRequestFullscreen() : null);
+  if(p && p.catch) p.catch(()=>{});
+}
+fsBtn.addEventListener('click', toggleFs);
+let keyLocked=false;
+async function setKeyLock(on){
+  try{ if(!navigator.keyboard) return;
+    if(on && navigator.keyboard.lock){ await navigator.keyboard.lock(); keyLocked=true; }
+    else if(!on && navigator.keyboard.unlock){ navigator.keyboard.unlock(); keyLocked=false; }
+  }catch(e){ keyLocked=false; }
+}
+keylockChk.addEventListener('change',()=>setKeyLock(keylockChk.checked));
+modeSel.addEventListener('change',()=>{ mode=modeSel.value;
+  if(mode==='abs'&&document.pointerLockElement) document.exitPointerLock(); });
+async function setActive(on){
+  active=on; ctrl.textContent=on?'停止控制':'启用控制'; ctrl.className=on?'':'off';
+  if(on){
+    if(!document.fullscreenElement){ try{ await (wrap.requestFullscreen?wrap.requestFullscreen({navigationUI:'hide'}):Promise.resolve()); }catch(e){} }
+    if(keylockChk.checked) await setKeyLock(true);
+    if(mode==='rel'){ cv.focus(); cv.requestPointerLock(); }
+  } else { setKeyLock(false); if(document.pointerLockElement) document.exitPointerLock(); }
+}
+ctrl.addEventListener('click',()=>setActive(!active));
+document.addEventListener('pointerlockchange',()=>{
+  if(mode==='rel'&&active&&document.pointerLockElement!==cv) setActive(false);
+});
+document.addEventListener('contextmenu', e=>e.preventDefault());
+addEventListener('keydown',e=>{
+  if(!active) return; e.preventDefault(); e.stopPropagation();
+  if(e.repeat) return;
+  const c=KMAP[e.code]; if(c) hid('kd '+modMask(e)+' '+c); else hid('km '+modMask(e));
+},true);
+addEventListener('keyup',e=>{
+  if(!active) return; e.preventDefault(); e.stopPropagation();
+  const c=KMAP[e.code]; if(c) hid('ku '+modMask(e)+' '+c); else hid('km '+modMask(e));
+},true);
+
+const tap=(mod,key)=>{ hid('kd '+mod+' '+key); setTimeout(()=>hid('ku '+mod+' '+key), 45); };
+document.getElementById('cad').addEventListener('click',()=>tap(5,0x4c));
+document.getElementById('alttab').addEventListener('click',()=>tap(4,0x2b));
+
+// power / reset jumper
+const gpulse=(n,ms)=>fetch(`/gpio?n=${n}&act=pulse&ms=${ms}`).catch(()=>{});
+const pgpio=document.getElementById('pgpio'); const rgpio=document.getElementById('rgpio');
+document.getElementById('power').addEventListener('click',()=>gpulse(+pgpio.value,500));
+document.getElementById('powerHold').addEventListener('click',()=>gpulse(+pgpio.value,5000));
+document.getElementById('reset').addEventListener('click',()=>gpulse(+rgpio.value,500));
+document.getElementById('savecfg').addEventListener('click',()=>{
+  const p=+pgpio.value, r=+rgpio.value, s=+document.getElementById('sgpio').value;
+  fetch(`/gpiocfg?power=${p}&reset=${r}&status=${s}`).then(r=>r.text()).then(()=>{
+    const b=document.getElementById('savecfg'); b.textContent='已保存'; setTimeout(()=>b.textContent='保存',1200);
+  }).catch(()=>{});
+});
+
+// mouse
+let absX=0,absY=0,absWheel=0,dirty=false;
+function toAbs(e){ const r=cv.getBoundingClientRect();
+  let nx=(e.clientX-r.left)/r.width, ny=(e.clientY-r.top)/r.height;
+  nx=Math.min(1,Math.max(0,nx)); ny=Math.min(1,Math.max(0,ny));
+  return [Math.round(nx*32767),Math.round(ny*32767)]; }
+cv.addEventListener('mousemove',e=>{ if(!active||mode!=='abs')return; [absX,absY]=toAbs(e); dirty=true; });
+cv.addEventListener('mousedown',e=>{ if(!active||mode!=='abs')return; e.preventDefault();
+  const B={0:1,1:4,2:2}; [absX,absY]=toAbs(e); btn|=(B[e.button]||0); dirty=true; });
+addEventListener('mouseup',e=>{ if(!active||mode!=='abs')return; const B={0:1,1:4,2:2}; btn&=~(B[e.button]||0); dirty=true; });
+cv.addEventListener('wheel',e=>{ if(!active||mode!=='abs')return; absWheel+=(e.deltaY>0?-1:1); dirty=true; },{passive:true});
+let accX=0,accY=0,relWheel=0;
+cv.addEventListener('mousemove',e=>{ if(!active||mode!=='rel'||document.pointerLockElement!==cv)return; accX+=e.movementX; accY+=e.movementY; });
+addEventListener('mousedown',e=>{ if(mode!=='rel'||!active)return; e.preventDefault(); const B={0:1,1:4,2:2}; btn|=(B[e.button]||0); hid('m 0 0 '+btn+' 0'); },true);
+addEventListener('mouseup',e=>{ if(mode!=='rel'||!active)return; const B={0:1,1:4,2:2}; btn&=~(B[e.button]||0); hid('m 0 0 '+btn+' 0'); },true);
+addEventListener('wheel',e=>{ if(mode!=='rel'||!active)return; relWheel+=(e.deltaY>0?-1:1); },{passive:true});
+const clamp=v=>v>127?127:(v<-127?-127:v);
+function loop(){
+  if(active&&mode==='abs'&&dirty){ let w=clamp(absWheel); hid('ma '+absX+' '+absY+' '+btn+' '+w); absWheel-=w; dirty=false; }
+  if(active&&mode==='rel'&&(accX||accY||relWheel)){ let g=0;
+    while((accX||accY||relWheel)&&g++<32){ const cx=clamp(accX),cy=clamp(accY),cw=clamp(relWheel);
+      hid('m '+cx+' '+cy+' '+btn+' '+cw); accX-=cx; accY-=cy; relWheel-=cw; } accX=accY=relWheel=0; }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

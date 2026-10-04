@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>登录 · RK-KVM</title>
+<style>
+  html,body{height:100%;margin:0;background:#0b0b0d;color:#ddd;
+    font-family:system-ui,sans-serif;display:flex;align-items:center;justify-content:center}
+  form{background:#16161a;border:1px solid #26262c;border-radius:12px;
+    padding:28px 26px;width:300px;box-shadow:0 8px 30px rgba(0,0,0,.5)}
+  h2{margin:0 0 18px;font-size:18px;color:#4ea1ff;text-align:center}
+  input{width:100%;box-sizing:border-box;margin:8px 0;padding:10px 12px;
+    background:#0e0e11;border:1px solid #333;border-radius:8px;color:#eee;font-size:14px}
+  button{width:100%;margin-top:14px;padding:10px;background:#2a6df4;color:#fff;
+    border:0;border-radius:8px;font-size:15px;cursor:pointer}
+  button:hover{background:#3d7cf6}
+  .err{color:#ff6b6b;font-size:13px;min-height:18px;text-align:center;margin-top:8px}
+  .tip{color:#888;font-size:12px;text-align:center;margin-top:14px}
+</style>
+</head>
+<body>
+<form method="post" action="/login">
+  <h2>RK-KVM</h2>
+  <input name="user" placeholder="用户名" autofocus autocomplete="username">
+  <input name="pass" type="password" placeholder="密码" autocomplete="current-password">
+  <button type="submit">登 录</button>
+  <div class="err" id="err"></div>
+  <div class="tip">默认账号 admin / admin，请登录后在后台修改</div>
+</form>
+<script>
+if (location.search.includes('e=1')) document.getElementById('err').textContent = '用户名或密码错误';
+</script>
+</body>
+</html>
