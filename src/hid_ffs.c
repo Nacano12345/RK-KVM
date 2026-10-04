@@ -48,7 +48,7 @@
 #define LISTEN_PORT		5001
 
 static const char *g_udc = UDC_DEFAULT;
-static int ep0_fd = -1, kbd_fd = -1, mouse_fd = -1, abs_fd = -1;
+static int ep0_fd = -1, kbd_fd = -1, mouse_fd = -1, abs_fd = -1, cons_fd = -1;
 static volatile int g_enabled = 0;
 static volatile sig_atomic_t g_stop = 0;
 
@@ -153,6 +153,21 @@ static const uint8_t absmouse_report[] = {
 	0xC0               /* End Collection */
 };
 
+/* Consumer Control (multimedia keys), 2-byte report: [usage_lo, usage_hi] */
+static const uint8_t consumer_report[] = {
+	0x05, 0x0C,        /* Usage Page (Consumer) */
+	0x09, 0x01,        /* Usage (Consumer Control) */
+	0xA1, 0x01,        /* Collection (Application) */
+	0x15, 0x00,        /*   Logical Minimum (0) */
+	0x26, 0xFF, 0x03,  /*   Logical Maximum (1023) */
+	0x19, 0x00,        /*   Usage Minimum (0) */
+	0x2A, 0xFF, 0x03,  /*   Usage Maximum (1023) */
+	0x75, 0x10,        /*   Report Size (16) */
+	0x95, 0x01,        /*   Report Count (1) */
+	0x81, 0x00,        /*   Input (Data,Array) */
+	0xC0               /* End Collection */
+};
+
 /* HID class descriptor (9 bytes) */
 struct usb_hid_desc {
 	__u8  bLength;
@@ -170,6 +185,7 @@ struct usb_hid_desc {
 #define KBD_EP_ADDR	0x81
 #define MOUSE_EP_ADDR	0x82
 #define ABS_EP_ADDR	0x83
+#define CONS_EP_ADDR	0x84
 
 struct speed_descs {
 	struct usb_interface_descriptor kbd_intf;
@@ -181,6 +197,9 @@ struct speed_descs {
 	struct usb_interface_descriptor abs_intf;
 	struct usb_hid_desc abs_hid;
 	struct usb_endpoint_descriptor_no_audio abs_ep;
+	struct usb_interface_descriptor cons_intf;
+	struct usb_hid_desc cons_hid;
+	struct usb_endpoint_descriptor_no_audio cons_ep;
 } __attribute__((packed));
 
 static const struct {
@@ -195,8 +214,8 @@ static const struct {
 		.length = LE32(sizeof g_descs),
 		.flags = LE32(FUNCTIONFS_HAS_FS_DESC | FUNCTIONFS_HAS_HS_DESC),
 	},
-	.fs_count = LE32(9),
-	.hs_count = LE32(9),
+	.fs_count = LE32(12),
+	.hs_count = LE32(12),
 	.fs = {
 		.kbd_intf = {
 			.bLength = sizeof(struct usb_interface_descriptor),
@@ -280,6 +299,34 @@ static const struct {
 			.bEndpointAddress = ABS_EP_ADDR,
 			.bmAttributes = USB_ENDPOINT_XFER_INT,
 			.wMaxPacketSize = LE16(6),
+			.bInterval = 10,
+		},
+		.cons_intf = {
+			.bLength = sizeof(struct usb_interface_descriptor),
+			.bDescriptorType = USB_DT_INTERFACE,
+			.bInterfaceNumber = 3,
+			.bAlternateSetting = 0,
+			.bNumEndpoints = 1,
+			.bInterfaceClass = USB_CLASS_HID,
+			.bInterfaceSubClass = 0,
+			.bInterfaceProtocol = 0,
+			.iInterface = 0,
+		},
+		.cons_hid = {
+			.bLength = sizeof(struct usb_hid_desc),
+			.bDescriptorType = USB_DT_HID,
+			.bcdHID = LE16(0x0111),
+			.bCountryCode = 0,
+			.bNumDescriptors = 1,
+			.bDescriptorType2 = USB_DT_REPORT,
+			.wDescriptorLength = LE16(sizeof consumer_report),
+		},
+		.cons_ep = {
+			.bLength = sizeof(struct usb_endpoint_descriptor_no_audio),
+			.bDescriptorType = USB_DT_ENDPOINT,
+			.bEndpointAddress = CONS_EP_ADDR,
+			.bmAttributes = USB_ENDPOINT_XFER_INT,
+			.wMaxPacketSize = LE16(2),
 			.bInterval = 10,
 		},
 	},
@@ -366,6 +413,34 @@ static const struct {
 			.bEndpointAddress = ABS_EP_ADDR,
 			.bmAttributes = USB_ENDPOINT_XFER_INT,
 			.wMaxPacketSize = LE16(6),
+			.bInterval = 8,
+		},
+		.cons_intf = {
+			.bLength = sizeof(struct usb_interface_descriptor),
+			.bDescriptorType = USB_DT_INTERFACE,
+			.bInterfaceNumber = 3,
+			.bAlternateSetting = 0,
+			.bNumEndpoints = 1,
+			.bInterfaceClass = USB_CLASS_HID,
+			.bInterfaceSubClass = 0,
+			.bInterfaceProtocol = 0,
+			.iInterface = 0,
+		},
+		.cons_hid = {
+			.bLength = sizeof(struct usb_hid_desc),
+			.bDescriptorType = USB_DT_HID,
+			.bcdHID = LE16(0x0111),
+			.bCountryCode = 0,
+			.bNumDescriptors = 1,
+			.bDescriptorType2 = USB_DT_REPORT,
+			.wDescriptorLength = LE16(sizeof consumer_report),
+		},
+		.cons_ep = {
+			.bLength = sizeof(struct usb_endpoint_descriptor_no_audio),
+			.bDescriptorType = USB_DT_ENDPOINT,
+			.bEndpointAddress = CONS_EP_ADDR,
+			.bmAttributes = USB_ENDPOINT_XFER_INT,
+			.wMaxPacketSize = LE16(2),
 			.bInterval = 8,
 		},
 	},
@@ -531,6 +606,12 @@ static int open_ffs(void)
 		perror("open ep3 (abs mouse)");
 		return -1;
 	}
+	snprintf(path, sizeof path, "%s/ep4", FFS_MNT);
+	cons_fd = open(path, O_RDWR);
+	if (cons_fd < 0) {
+		perror("open ep4 (consumer)");
+		return -1;
+	}
 	return 0;
 }
 
@@ -589,6 +670,13 @@ static void abs_send(int x, int y, int wheel)
 	rep[5] = (uint8_t)(int8_t)wheel;
 	if (g_enabled)
 		(void)write(abs_fd, rep, sizeof rep);
+}
+
+static void consumer_send(uint16_t usage)
+{
+	uint8_t rep[2] = { usage & 0xff, (usage >> 8) & 0xff };
+	if (g_enabled)
+		(void)write(cons_fd, rep, sizeof rep);
 }
 
 static void kbd_key_down(uint8_t key)
@@ -653,6 +741,9 @@ static void handle_setup(struct usb_ctrlrequest *setup)
 			} else if (iface == 2) {
 				rd = absmouse_report;
 				rl = sizeof absmouse_report;
+			} else if (iface == 3) {
+				rd = consumer_report;
+				rl = sizeof consumer_report;
 			} else {
 				rd = mouse_report;
 				rl = sizeof mouse_report;
@@ -769,6 +860,26 @@ static void handle_command(char *line, char *reply, size_t rlen)
 			snprintf(reply, rlen, "ok\n");
 			return;
 		}
+	} else if (!strcmp(cmd, "c")) {
+		unsigned v;
+		if (sscanf(line, "%*s %x", &v) == 1) {
+			consumer_send((uint16_t)v);
+			usleep(15000);
+			consumer_send(0);
+			snprintf(reply, rlen, "ok\n");
+			return;
+		}
+	} else if (!strcmp(cmd, "cd")) {
+		unsigned v;
+		if (sscanf(line, "%*s %x", &v) == 1) {
+			consumer_send((uint16_t)v);
+			snprintf(reply, rlen, "ok\n");
+			return;
+		}
+	} else if (!strcmp(cmd, "cu")) {
+		consumer_send(0);
+		snprintf(reply, rlen, "ok\n");
+		return;
 	} else if (!strcmp(cmd, "mb")) {
 		if (sscanf(line, "%*s %d", &n) == 1) {
 			g_mouse_btn = (uint8_t)n;
@@ -875,9 +986,11 @@ int main(int argc, char **argv)
 		close(mouse_fd);
 	if (abs_fd >= 0)
 		close(abs_fd);
+	if (cons_fd >= 0)
+		close(cons_fd);
 	if (ep0_fd >= 0)
 		close(ep0_fd);
-	kbd_fd = mouse_fd = abs_fd = ep0_fd = -1;
+	kbd_fd = mouse_fd = abs_fd = cons_fd = ep0_fd = -1;
 	/* Do NOT unbind the UDC here: on this kernel, unbinding the ffs
 	 * gadget after use can wedge configfs. configfs is reset on reboot. */
 	return 0;
