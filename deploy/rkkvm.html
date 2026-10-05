@@ -90,6 +90,7 @@
   <span class="brand">RK-KVM</span>
   <span><span id="wsdot" class="dot"></span></span>
   <span id="status">连接中…</span>
+  <span id="dbg" style="font-size:11px;opacity:.55;color:#7fd"></span>
   <button id="kbToggle" title="显示/隐藏虚拟键盘">⌨ 键盘</button>
   <span class="sp"></span>
   <a href="/admin">后台</a>
@@ -214,7 +215,12 @@ function connect(){
   ws.onerror=()=>{};
 }
 connect();
+let vkbMod=0, physMod=0, capsOn=false, numOn=false;
+let updateInds=()=>{};
+let dbgEl=null;
+function dbg(cmd){ try{ if(!dbgEl)dbgEl=document.getElementById('dbg'); if(dbgEl)dbgEl.textContent='TX '+cmd; }catch(_){} }
 function hid(cmd){
+  dbg(cmd);
   if(ws && ws.readyState===WebSocket.OPEN) ws.send(cmd);
   else fetch('/api/hid',{method:'POST',body:cmd}).catch(()=>{});
 }
@@ -349,16 +355,16 @@ ctrl.addEventListener('click',()=>setActive(!active));
 document.addEventListener('pointerlockchange',()=>{ if(mode==='rel'&&active&&document.pointerLockElement!==cv)setActive(false); });
 document.addEventListener('contextmenu',e=>e.preventDefault());
 addEventListener('keydown',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
-  if(e.code==='CapsLock')capsOn=!capsOn;
-  if(e.code==='NumLock')numOn=!numOn;
-  physMod=modMask(e); updateInds();
-  if(e.repeat)return;
   const c=KMAP[e.code]; const m=modMask(e).toString(16);
-  if(c)hid('kd '+m+' '+c.toString(16)); else hid('km '+m); },true);
+  if(!e.repeat){ if(c)hid('kd '+m+' '+c.toString(16)); else hid('km '+m); }
+  try{ if(e.code==='CapsLock')capsOn=!capsOn; if(e.code==='NumLock')numOn=!numOn;
+    physMod=modMask(e); updateInds(); }catch(_){}
+},true);
 addEventListener('keyup',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
-  physMod=modMask(e); updateInds();
   const c=KMAP[e.code]; const m=modMask(e).toString(16);
-  if(c)hid('ku '+m+' '+c.toString(16)); else hid('km '+m); },true);
+  if(c)hid('ku '+m+' '+c.toString(16)); else hid('km '+m);
+  try{ physMod=modMask(e); updateInds(); }catch(_){}
+},true);
 
 const tap=(mod,key)=>{ const m=mod.toString(16), k=key.toString(16); hid('kd '+m+' '+k); setTimeout(()=>hid('ku '+m+' '+k),45); };
 document.getElementById('cad').addEventListener('click',()=>tap(5,0x4c));
@@ -430,11 +436,10 @@ function build(rows, parent){
 }
 build(Main,vkmain); build(Side,vkside);
 
-let vkbMod=0, physMod=0, capsOn=false, numOn=false;
 const indCaps=document.getElementById('indCaps'), indNum=document.getElementById('indNum');
 const indCtrl=document.getElementById('indCtrl'), indShift=document.getElementById('indShift'),
       indAlt=document.getElementById('indAlt'), indWin=document.getElementById('indWin');
-function updateInds(){
+updateInds = () => {
   const mm=vkbMod|physMod;
   indCaps.classList.toggle('on',capsOn);
   indNum.classList.toggle('on',numOn);
@@ -442,7 +447,7 @@ function updateInds(){
   indShift.classList.toggle('on',(mm&2)!==0);
   indAlt.classList.toggle('on',(mm&4)!==0);
   indWin.classList.toggle('on',(mm&8)!==0);
-}
+};
 addEventListener('blur',()=>{ physMod=0; updateInds(); });
 function clearMods(){ vkbMod=0; document.querySelectorAll('#vkb button.mod').forEach(x=>x.classList.remove('mod-on')); updateInds(); }
 document.getElementById('kbToggle').addEventListener('click',()=>{ vkb.style.display=(vkb.style.display==='flex')?'none':'flex'; });
