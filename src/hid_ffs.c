@@ -52,6 +52,63 @@ static int ep0_fd = -1, kbd_fd = -1, mouse_fd = -1, abs_fd = -1, cons_fd = -1;
 static volatile int g_enabled = 0;
 static volatile sig_atomic_t g_stop = 0;
 
+/* Per-endpoint writer mailbox: the command thread only posts the latest
+ * report; a dedicated thread does the (possibly blocking) FFS write so a
+ * stuck endpoint can never wedge the control server. */
+struct eplink {
+	int fd;
+	pthread_mutex_t m;
+	pthread_cond_t c;
+	uint8_t buf[16];
+	int len;
+	int has;
+};
+static struct eplink g_ep_kbd, g_ep_mouse, g_ep_abs, g_ep_cons;
+
+static void *ep_writer(void *arg)
+{
+	struct eplink *e = arg;
+	for (;;) {
+		pthread_mutex_lock(&e->m);
+		while (!e->has)
+			pthread_cond_wait(&e->c, &e->m);
+		int l = e->len;
+		uint8_t b[16];
+		memcpy(b, e->buf, l);
+		e->has = 0;
+		pthread_mutex_unlock(&e->m);
+		if (g_enabled && e->fd >= 0)
+			(void)write(e->fd, b, l);
+	}
+	return NULL;
+}
+
+static void ep_post(struct eplink *e, const uint8_t *data, int len)
+{
+	if (e->fd < 0)
+		return;
+	if (len > (int)sizeof e->buf)
+		len = sizeof e->buf;
+	pthread_mutex_lock(&e->m);
+	memcpy(e->buf, data, len);
+	e->len = len;
+	e->has = 1;
+	pthread_cond_signal(&e->c);
+	pthread_mutex_unlock(&e->m);
+}
+
+static void ep_init(struct eplink *e, int fd)
+{
+	e->fd = fd;
+	e->len = 0;
+	e->has = 0;
+	pthread_mutex_init(&e->m, NULL);
+	pthread_cond_init(&e->c, NULL);
+	pthread_t th;
+	if (pthread_create(&th, NULL, ep_writer, e) == 0)
+		pthread_detach(th);
+}
+
 static void on_term(int sig)
 {
 	(void)sig;
@@ -612,6 +669,10 @@ static int open_ffs(void)
 		perror("open ep4 (consumer)");
 		return -1;
 	}
+	ep_init(&g_ep_kbd, kbd_fd);
+	ep_init(&g_ep_mouse, mouse_fd);
+	ep_init(&g_ep_abs, abs_fd);
+	ep_init(&g_ep_cons, cons_fd);
 	return 0;
 }
 
@@ -632,8 +693,7 @@ static void kbd_send(void)
 	rep[0] = g_kbd_mod;
 	rep[1] = 0;
 	memcpy(&rep[2], g_kbd_keys, 6);
-	if (g_enabled)
-		(void)write(kbd_fd, rep, sizeof rep);
+	ep_post(&g_ep_kbd, rep, sizeof rep);
 }
 
 static void mouse_send(int dx, int dy, int wheel)
@@ -649,8 +709,7 @@ static void mouse_send(int dx, int dy, int wheel)
 	rep[1] = (uint8_t)(int8_t)dx;
 	rep[2] = (uint8_t)(int8_t)dy;
 	rep[3] = (uint8_t)(int8_t)wheel;
-	if (g_enabled)
-		(void)write(mouse_fd, rep, sizeof rep);
+	ep_post(&g_ep_mouse, rep, sizeof rep);
 }
 
 static void abs_send(int x, int y, int wheel)
@@ -668,15 +727,13 @@ static void abs_send(int x, int y, int wheel)
 	rep[3] = y & 0xff;
 	rep[4] = (y >> 8) & 0x7f;
 	rep[5] = (uint8_t)(int8_t)wheel;
-	if (g_enabled)
-		(void)write(abs_fd, rep, sizeof rep);
+	ep_post(&g_ep_abs, rep, sizeof rep);
 }
 
 static void consumer_send(uint16_t usage)
 {
 	uint8_t rep[2] = { usage & 0xff, (usage >> 8) & 0xff };
-	if (g_enabled)
-		(void)write(cons_fd, rep, sizeof rep);
+	ep_post(&g_ep_cons, rep, sizeof rep);
 }
 
 static void kbd_key_down(uint8_t key)
