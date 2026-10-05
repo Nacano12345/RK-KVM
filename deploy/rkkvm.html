@@ -353,12 +353,14 @@ addEventListener('keydown',e=>{ if(!active)return; e.preventDefault(); e.stopPro
   if(e.code==='NumLock')numOn=!numOn;
   physMod=modMask(e); updateInds();
   if(e.repeat)return;
-  const c=KMAP[e.code]; if(c)hid('kd '+modMask(e)+' '+c); else hid('km '+modMask(e)); },true);
+  const c=KMAP[e.code]; const m=modMask(e).toString(16);
+  if(c)hid('kd '+m+' '+c.toString(16)); else hid('km '+m); },true);
 addEventListener('keyup',e=>{ if(!active)return; e.preventDefault(); e.stopPropagation();
   physMod=modMask(e); updateInds();
-  const c=KMAP[e.code]; if(c)hid('ku '+modMask(e)+' '+c); else hid('km '+modMask(e)); },true);
+  const c=KMAP[e.code]; const m=modMask(e).toString(16);
+  if(c)hid('ku '+m+' '+c.toString(16)); else hid('km '+m); },true);
 
-const tap=(mod,key)=>{ hid('kd '+mod+' '+key); setTimeout(()=>hid('ku '+mod+' '+key),45); };
+const tap=(mod,key)=>{ const m=mod.toString(16), k=key.toString(16); hid('kd '+m+' '+k); setTimeout(()=>hid('ku '+m+' '+k),45); };
 document.getElementById('cad').addEventListener('click',()=>tap(5,0x4c));
 document.getElementById('alttab').addEventListener('click',()=>tap(4,0x2b));
 
@@ -450,7 +452,7 @@ vkb.addEventListener('click',e=>{
   if(b.dataset.mod!=null){ const m=+b.dataset.mod; vkbMod^=m; b.classList.toggle('mod-on',(vkbMod&m)!==0); updateInds(); return; }
   if(b.dataset.cons){ hid('c '+b.dataset.cons); return; }
   if(b.dataset.code){ const u=KMAP[b.dataset.code]; if(u){
-    hid('k '+vkbMod+' '+u);
+    hid('k '+vkbMod.toString(16)+' '+u.toString(16));
     if(b.dataset.code==='CapsLock')capsOn=!capsOn;
     if(b.dataset.code==='NumLock')numOn=!numOn;
     clearMods(); } }
