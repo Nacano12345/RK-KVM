@@ -108,7 +108,8 @@
         <select id="mode"><option value="abs" selected>绝对(跟随)</option><option value="rel">相对(锁定)</option></select>
       </div>
       <div class="grp"><button id="fs" class="gray">全屏</button>
-        <label style="min-width:0"><input type="checkbox" id="keylock"> 全键捕获</label></div>
+        <label style="min-width:0"><input type="checkbox" id="keylock"> 全键捕获</label>
+        <label style="min-width:0"><input type="checkbox" id="audioOn"> 音频</label></div>
     </div>
   </details>
   <details open>
@@ -306,6 +307,49 @@ let autoRefresh = mem.get('autoRefresh', true);
 const arChk=document.getElementById('autoRefresh'), vrBtn=document.getElementById('vrefresh');
 if(arChk){ arChk.checked=autoRefresh; arChk.addEventListener('change',()=>{ autoRefresh=arChk.checked; mem.set('autoRefresh',autoRefresh); }); }
 if(vrBtn) vrBtn.addEventListener('click',()=>videoStart());
+
+// ---------- audio (WebSocket /aws -> Web Audio, 48k s16le stereo) ----------
+let aws=null, actx=null, aProc=null, aRing=null, aR=0, aW=0;
+const audioEnabled0 = mem.get('audio', false);
+function audioStart(){
+  if(aws) return;
+  aRing=new Float32Array(1<<17); aR=0; aW=0;
+  const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/aws';
+  aws=new WebSocket(url); aws.binaryType='arraybuffer';
+  aws.onmessage=ev=>{
+    const dv=new DataView(ev.data), n=dv.byteLength>>1, mask=aRing.length-1;
+    for(let i=0;i<n;i++){ aRing[aW]=dv.getInt16(i*2,true)/32768; aW=(aW+1)&mask; }
+    if(((aW-aR)&mask) > (aRing.length>>1)) aR=(aW-(aRing.length>>2))&mask;  // drop if lagging
+  };
+  aws.onclose=()=>{ aws=null; const c=document.getElementById('audioOn'); if(c&&c.checked) setTimeout(audioStart,1000); };
+  aws.onerror=()=>{};
+  try{ actx=new (window.AudioContext||window.webkitAudioContext)({sampleRate:48000}); }catch(_){ actx=null; }
+  if(actx && !aProc){
+    aProc=actx.createScriptProcessor(2048,0,2);
+    const mask=()=>aRing.length-1;
+    aProc.onaudioprocess=e=>{
+      const L=e.outputBuffer.getChannelData(0), R=e.outputBuffer.getChannelData(1), m=mask();
+      for(let i=0;i<L.length;i++){
+        if(((aW-aR)&m)>=2){ L[i]=aRing[aR]; R[i]=aRing[(aR+1)&m]; aR=(aR+2)&m; }
+        else { L[i]=0; R[i]=0; }
+      }
+    };
+    aProc.connect(actx.destination);
+  }
+  if(actx && actx.state==='suspended') actx.resume();
+}
+function audioStop(){
+  if(aws){ try{aws.close();}catch(_){} aws=null; }
+  if(aProc){ try{aProc.disconnect();}catch(_){} aProc.onaudioprocess=null; aProc=null; }
+  if(actx){ try{actx.close();}catch(_){} actx=null; }
+}
+const audioChk=document.getElementById('audioOn');
+if(audioChk){
+  audioChk.checked=audioEnabled0;
+  audioChk.addEventListener('change',()=>{ mem.set('audio',audioChk.checked);
+    if(audioChk.checked) audioStart(); else audioStop(); });
+  if(audioEnabled0) audioStart();
+}
 
 // ---------- status ----------
 let lastTx=0,lastT=0,prevSeq=-1,prevSeqT=0,stallSeq=-1,stallT=performance.now(),cfgLoaded=false;

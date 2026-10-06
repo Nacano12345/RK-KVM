@@ -948,6 +948,74 @@ static void ws_video_serve(int c, char *req)
 	free(buf);
 }
 
+/* -------------------- audio (ALSA capture over WebSocket) ---------------- */
+static pthread_mutex_t a_lock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t a_cond = PTHREAD_COND_INITIALIZER;
+static uint8_t a_buf[32768];
+static int a_len = 0;
+static volatile unsigned long a_seq = 0;
+static char g_audio_dev[64] = "hw:0,0";
+static int g_audio_rate = 48000, g_audio_ch = 2;
+static int g_audio_on = 1;
+
+static void load_audio_cfg(void)
+{
+	FILE *f = fopen("/userdata/audio.conf", "r");
+	if (!f)
+		return;
+	char line[160];
+	while (fgets(line, sizeof line, f)) {
+		char *eq = strchr(line, '=');
+		if (!eq)
+			continue;
+		*eq = 0;
+		char *k = line;
+		while (*k == ' ' || *k == '\t') k++;
+		char *v = eq + 1;
+		while (*v == ' ' || *v == '\t') v++;
+		char *e = v + strlen(v);
+		while (e > v && (e[-1] == '\n' || e[-1] == '\r' || e[-1] == ' ' || e[-1] == '\t'))
+			*--e = 0;
+		if (!strcmp(k, "AUDIO_DEV"))
+			snprintf(g_audio_dev, sizeof g_audio_dev, "%s", v);
+		else if (!strcmp(k, "AUDIO_RATE"))
+			g_audio_rate = atoi(v);
+		else if (!strcmp(k, "AUDIO_CH"))
+			g_audio_ch = atoi(v);
+		else if (!strcmp(k, "AUDIO_ENABLE"))
+			g_audio_on = atoi(v);
+	}
+	fclose(f);
+}
+
+/* Audio: stream raw PCM from a FIFO written by an external 'arecord'
+ * (started by the init script).  This runs inside the /aws client thread
+ * (same model as /stream) so we never fork() nor spawn a startup thread. */
+static void ws_audio_serve(int c, char *req)
+{
+	if (ws_accept(c, req) != 0)
+		return;
+	int fd = open("/run/rk.pcm", O_RDONLY);	/* blocks until arecord writes */
+	if (fd < 0)
+		return;
+	uint8_t buf[4096];
+	while (!g_stop) {
+		ssize_t r = read(fd, buf, sizeof buf);
+		if (r <= 0)
+			break;
+		uint8_t hdr[10];
+		int hl;
+		size_t L = r;
+		hdr[0] = 0x82;
+		if (L < 126) { hdr[1] = L; hl = 2; }
+		else if (L < 65536) { hdr[1] = 126; hdr[2] = (L >> 8) & 0xff; hdr[3] = L & 0xff; hl = 4; }
+		else { hdr[1] = 127; for (int i = 0; i < 8; i++) hdr[2 + i] = (L >> (56 - 8 * i)) & 0xff; hl = 10; }
+		if (send_all(c, hdr, hl) < 0 || send_all(c, buf, L) < 0)
+			break;
+	}
+	close(fd);
+}
+
 /* ------------------------------ dispatch --------------------------------- */
 
 static int gpio_set(int n, const char *val, const char *dir)
@@ -1044,7 +1112,7 @@ static void *client_thread(void *arg)
 			!strncmp(path, "/setres", 7) || !strncmp(path, "/setenc", 7) ||
 			!strncmp(path, "/gpio", 5) || !strncmp(path, "/gpiocfg", 8) ||
 			!strncmp(path, "/ws", 3) || !strncmp(path, "/vws", 4) ||
-			!strncmp(path, "/admin/exec", 11);
+			!strncmp(path, "/aws", 4) || !strncmp(path, "/admin/exec", 11);
 		if (is_data)
 			send_401(c);
 		else
@@ -1135,6 +1203,8 @@ static void *client_thread(void *arg)
 		send_all(c, hdr, hl);
 	} else if (!strncmp(req, "GET /admin", 10)) {
 		serve_file(c, "/userdata/admin.html", "text/html; charset=utf-8");
+	} else if (!strncmp(req, "GET /aws", 8)) {
+		ws_audio_serve(c, req);
 	} else if (!strncmp(req, "GET /vws", 8)) {
 		ws_video_serve(c, req);
 	} else if (!strncmp(req, "GET /ws", 7)) {
@@ -1305,6 +1375,7 @@ int main(void)
 
 	load_cfg();
 	load_creds();
+	load_audio_cfg();
 
 	if (setup_uvc() < 0)
 		return 1;
