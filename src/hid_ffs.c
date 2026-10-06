@@ -831,8 +831,12 @@ static void *ep0_thread(void *arg)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
-			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				usleep(2000);	/* transient; keep serving events */
+			/* transient / cancel errors during (re)enumeration must not
+			 * kill this thread, or the next enumeration can't be served */
+			if (errno == EAGAIN || errno == EWOULDBLOCK ||
+			    errno == EIDRM || errno == ENODEV ||
+			    errno == ESHUTDOWN) {
+				usleep(2000);
 				continue;
 			}
 			perror("ep0 read");
