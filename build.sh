@@ -77,5 +77,9 @@ arm-linux-gcc -static -O2 -pthread \
   -o rkkvm-video video_uvc.c \
   "$STAGE/lib/libuvc.a" "$STAGE/lib/libusb-1.0.a" "$STAGE/lib/libturbojpeg.a" -lpthread -lm
 arm-linux-gcc -static -O2 -o gpioscan gpioscan.c
+arm-linux-gcc -static -O2 -I"$STAGE/include" -I"$STAGE/include/libusb-1.0" \
+  -o uac_capture uac_capture.c "$STAGE/lib/libusb-1.0.a" -lpthread -lm
+arm-linux-gcc -static -O2 -I"$STAGE/include" -I"$STAGE/include/libusb-1.0" \
+  -o usbdump usbdump.c "$STAGE/lib/libusb-1.0.a" -lpthread -lm
 
-echo ">> done: src/rkkvm-hid  src/rkkvm-video  src/gpioscan"
+echo ">> done: src/rkkvm-hid  src/rkkvm-video  src/gpioscan  src/uac_capture  src/usbdump"

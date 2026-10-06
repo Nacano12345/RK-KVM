@@ -17,6 +17,8 @@
 /src/rkkvm-hid
 /src/rkkvm-video
 /src/gpioscan
+/src/uac_capture
+/src/usbdump
 /src/hello
 
 # device runtime secrets
