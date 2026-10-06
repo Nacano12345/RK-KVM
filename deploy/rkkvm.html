@@ -148,7 +148,15 @@
         <button id="cad" class="gray">Ctrl+Alt+Del</button>
         <button id="alttab" class="gray">Alt+Tab</button>
       </div>
-      <div class="muted">这些键被操作系统截获，网页无法直接捕获，故用按钮发送。</div>
+      <div class="grp">
+        <button id="win" class="gray">Win</button>
+        <button id="winr" class="gray">Win+R</button>
+        <button id="wine" class="gray">Win+E</button>
+        <button id="wind" class="gray">Win+D</button>
+        <button id="winl" class="gray">Win+L</button>
+        <button id="wintab" class="gray">Win+Tab</button>
+      </div>
+      <div class="muted">Win(Super)/Alt+Tab/Ctrl+Alt+Del 等被系统截获，网页无法直接捕获，故用按钮发送。虚拟键盘的 Win 修饰键可配合任意键。</div>
     </div>
   </details>
   <details>
@@ -487,9 +495,21 @@ addEventListener('keyup',e=>{ if(!active)return; e.preventDefault(); e.stopPropa
   try{ physMod=modMask(e); updateInds(); }catch(_){}
 },true);
 
-const tap=(mod,key)=>{ const m=mod.toString(16), k=key.toString(16); hid('kd '+m+' '+k); setTimeout(()=>hid('ku '+m+' '+k),45); };
+// tap a key with modifiers, then release the modifiers
+const tap=(mod,key)=>{ const m=mod.toString(16), k=key.toString(16);
+  hid('kd '+m+' '+k);
+  setTimeout(()=>{ hid('ku '+m+' '+k); if(mod) setTimeout(()=>hid('km 0'),30); },45); };
 document.getElementById('cad').addEventListener('click',()=>tap(5,0x4c));
 document.getElementById('alttab').addEventListener('click',()=>tap(4,0x2b));
+// Win(Super)=0x08; Meta can't be captured from the OS, so offer buttons
+const WIN=8;
+const winOnly=()=>{ hid('km 8'); setTimeout(()=>hid('km 0'),200); };
+document.getElementById('win').addEventListener('click',winOnly);
+document.getElementById('winr').addEventListener('click',()=>tap(WIN,0x15));   // R
+document.getElementById('wine').addEventListener('click',()=>tap(WIN,0x08));   // E
+document.getElementById('wind').addEventListener('click',()=>tap(WIN,0x07));   // D
+document.getElementById('winl').addEventListener('click',()=>tap(WIN,0x0f));   // L
+document.getElementById('wintab').addEventListener('click',()=>tap(WIN,0x2b)); // Tab
 
 const gpulse=(n,ms)=>fetch(`/gpio?n=${n}&act=pulse&ms=${ms}`).catch(()=>{});
 const pgpio=document.getElementById('pgpio'), rgpio=document.getElementById('rgpio');
