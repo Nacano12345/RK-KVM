@@ -12,7 +12,12 @@
   #bar a{color:#9cf;text-decoration:none}
   #bar a:hover{text-decoration:underline}
   .sp{flex:1}
-  .wrap{display:flex;height:calc(100% - 41px);min-height:0}
+  .tabs{display:flex;gap:4px;padding:6px 10px;background:#121216;border-bottom:1px solid #26262c}
+  .tab{padding:6px 14px;border-radius:6px;cursor:pointer;font-family:system-ui;font-size:13px;color:#9aa}
+  .tab.active{background:#2a6df4;color:#fff}
+  .tabpage{display:none}
+  .tabpage.active{display:block}
+  .wrap{display:flex;height:calc(100vh - 78px);min-height:0}
   .left{flex:1.4;display:flex;flex-direction:column;padding:10px;min-width:0}
   .right{width:300px;border-left:1px solid #26262c;padding:10px;overflow:auto}
   textarea{width:100%;box-sizing:border-box;background:#0e0e11;color:#eee;border:1px solid #333;
@@ -23,10 +28,36 @@
   button{background:#2a6df4;color:#fff;border:0;border-radius:6px;padding:6px 10px;
     font-size:13px;cursor:pointer;font-family:system-ui}
   button:hover{background:#3d7cf6}
+  button.g{background:#333}button.g:hover{background:#444}
+  button.r{background:#a33}button.r:hover{background:#c44}
+  .mini{font-size:11px;padding:3px 7px;border-radius:5px}
   .row{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0}
   .card{background:#121216;border:1px solid #26262c;border-radius:8px;padding:8px;margin-bottom:10px}
   .card h4{margin:0 0 6px;font-size:13px;color:#8bd;font-family:system-ui}
   input,select{background:#0e0e11;color:#eee;border:1px solid #333;border-radius:6px;padding:6px;font-size:13px;width:100%;box-sizing:border-box;margin:4px 0}
+  label{font-size:12px;color:#9aa}
+  /* services */
+  .toolbar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid #26262c;font-family:system-ui}
+  .cols{display:flex;gap:12px;overflow-x:auto;padding:12px;align-items:flex-start;height:calc(100vh - 120px);box-sizing:border-box}
+  .mgr{flex:0 0 auto;width:360px;background:#121216;border:1px solid #26262c;border-radius:8px;display:flex;flex-direction:column;max-height:100%}
+  .mgr>header{display:flex;gap:6px;align-items:center;padding:8px;border-bottom:1px solid #26262c}
+  .mgr>header b{color:#4ea1ff;font-family:system-ui;font-size:13px}
+  .mgr>header .u{font-size:11px;color:#777;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mgr .body{overflow:auto;padding:6px 8px}
+  .it{border:1px solid #222228;border-radius:6px;padding:6px;margin-bottom:6px}
+  .it .h{display:flex;align-items:center;gap:6px}
+  .it .n{font-size:12.5px;color:#cde;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dot{width:8px;height:8px;border-radius:50%;background:#666;flex:0 0 auto}
+  .dot.on{background:#39d353;box-shadow:0 0 6px #39d353}
+  .it .p{font-size:11px;color:#666;margin:2px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .mgr>footer{padding:8px;border-top:1px solid #26262c}
+  /* modal */
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;justify-content:center;z-index:50}
+  .modal{background:#16161a;border:1px solid #2a2a31;border-radius:10px;padding:14px;width:min(600px,92vw);max-height:88vh;overflow:auto}
+  .modal h3{margin:0 0 8px;font-family:system-ui;font-size:15px;color:#8bd}
+  .modal .foot{display:flex;justify-content:flex-end;gap:8px;margin-top:10px}
+  .hint{font-size:11px;color:#777;margin:2px 0 6px}
+  .msg{font-size:12px;min-height:16px}
 </style>
 </head>
 <body>
@@ -38,47 +69,82 @@
   <span class="sp"></span>
   <span id="who" style="opacity:.7"></span>
 </div>
-<div class="wrap">
-  <div class="left">
-    <textarea id="cmd" spellcheck="false" placeholder="输入 shell 命令（root 权限）…例如： cat /userdata/kvm.conf"></textarea>
-    <div class="row">
-      <button onclick="run()">执行</button>
-      <button onclick="run('uptime; free; df -h')">系统信息</button>
-      <button onclick="run('ps | head -40')">进程</button>
-      <button onclick="run('cat /userdata/kvm.conf')">查看KVM配置</button>
-      <button onclick="run('/etc/init.d/S52rkkvm-video.sh restart; cat /var/log/rkkvm-video.log | tail -5')">重启视频</button>
-      <button onclick="run('/etc/init.d/S51rkkvm-hid.sh restart')">重启HID</button>
-      <button onclick="run('ip -brief addr; ip route')">网络</button>
-      <button onclick="run('cat /var/log/rkkvm-hid.log | tail -10')">HID日志</button>
-    </div>
-    <pre id="out">点“执行”或上面的快捷按钮。</pre>
-  </div>
-  <div class="right">
-    <div class="card">
-      <h4>修改密码</h4>
-      <input id="oldp" type="password" placeholder="当前密码">
-      <input id="newp" type="password" placeholder="新密码（≥4位）">
-      <button onclick="chpass()">修改</button>
-      <div id="pmsg" style="font-size:12px;color:#8f8;min-height:16px;margin-top:6px"></div>
-    </div>
-    <div class="card">
-      <h4>KVM 跳线 GPIO</h4>
-      <label style="font-size:12px">电源脚</label><input id="pg" type="number">
-      <label style="font-size:12px">复位脚</label><input id="rg" type="number">
-      <label style="font-size:12px">状态脚(-1关)</label><input id="sg" type="number">
-      <button onclick="savegpio()">保存</button>
-      <div id="gmsg" style="font-size:12px;color:#8f8;min-height:16px;margin-top:6px"></div>
-    </div>
-    <div class="card">
-      <h4>危险操作</h4>
+
+<div class="tabs">
+  <div class="tab active" data-tab="term" onclick="showTab('term')">终端</div>
+  <div class="tab" data-tab="svc" onclick="showTab('svc')">服务管理</div>
+  <div class="tab" data-tab="cfg" onclick="showTab('cfg')">设置</div>
+</div>
+
+<!-- 终端 -->
+<div class="tabpage active" id="tab-term">
+  <div class="wrap">
+    <div class="left">
+      <textarea id="cmd" spellcheck="false" placeholder="输入 shell 命令（root 权限）…例如： cat /userdata/kvm.conf"></textarea>
       <div class="row">
-        <button style="background:#7a2" onclick="run('sync; reboot')">重启系统</button>
-        <button style="background:#a33" onclick="if(confirm('关机？'))run('poweroff')">关机</button>
+        <button onclick="run()">执行</button>
+        <button onclick="run('uptime; free; df -h')">系统信息</button>
+        <button onclick="run('ps | head -40')">进程</button>
+        <button onclick="run('cat /userdata/kvm.conf')">查看KVM配置</button>
+        <button onclick="run('/etc/init.d/S52rkkvm-video.sh restart; cat /var/log/rkkvm-video.log | tail -5')">重启视频</button>
+        <button onclick="run('/etc/init.d/S51rkkvm-hid.sh restart')">重启HID</button>
+        <button onclick="run('ip -brief addr; ip route')">网络</button>
+        <button onclick="run('cat /var/log/rkkvm-hid.log | tail -10')">HID日志</button>
+      </div>
+      <pre id="out">点“执行”或上面的快捷按钮。</pre>
+    </div>
+    <div class="right">
+      <div class="card">
+        <h4>修改密码</h4>
+        <input id="oldp" type="password" placeholder="当前密码">
+        <input id="newp" type="password" placeholder="新密码（≥4位）">
+        <button onclick="chpass()">修改</button>
+        <div id="pmsg" class="msg" style="color:#8f8"></div>
+      </div>
+      <div class="card">
+        <h4>危险操作</h4>
+        <div class="row">
+          <button style="background:#7a2" onclick="run('sync; reboot')">重启系统</button>
+          <button class="r" onclick="if(confirm('关机？'))run('poweroff')">关机</button>
+        </div>
       </div>
     </div>
   </div>
 </div>
+
+<!-- 服务管理 -->
+<div class="tabpage" id="tab-svc">
+  <div class="toolbar">
+    <button onclick="editMgr()">+ 添加 SvcManager</button>
+    <span class="hint" style="margin:0">每个栏对应一个 svcmgr 实例（本地或远程 + API Token）</span>
+    <span class="sp"></span>
+    <button class="g mini" onclick="renderMgrs()">刷新全部</button>
+  </div>
+  <div class="cols" id="cols"></div>
+</div>
+
+<!-- 设置 -->
+<div class="tabpage" id="tab-cfg">
+  <div style="padding:12px;max-width:520px">
+    <div class="card">
+      <h4>KVM 跳线 GPIO</h4>
+      <label>电源脚</label><input id="pg" type="number">
+      <label>复位脚</label><input id="rg" type="number">
+      <label>状态脚(-1关)</label><input id="sg" type="number">
+      <button onclick="savegpio()">保存</button>
+      <div id="gmsg" class="msg" style="color:#8f8"></div>
+    </div>
+  </div>
+</div>
+
 <script>
+/* ---------------- tabs ---------------- */
+function showTab(id){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===id));
+  document.querySelectorAll('.tabpage').forEach(p=>p.classList.toggle('active',p.id==='tab-'+id));
+}
+
+/* ---------------- shell ---------------- */
 async function run(cmd){
   const el=document.getElementById('cmd');
   if(cmd!==undefined) el.value=cmd;
@@ -113,7 +179,222 @@ async function savegpio(){
   document.getElementById('gmsg').textContent='已保存';
   setTimeout(()=>document.getElementById('gmsg').textContent='',1500);
 }
+
+/* ---------------- SvcManager ---------------- */
+const LS_KEY='rkkvm_svcmgrs';
+let MGRS = JSON.parse(localStorage.getItem(LS_KEY)||'[]');
+function saveMgrList(){ localStorage.setItem(LS_KEY, JSON.stringify(MGRS)); }
+function localBase(){
+  // 经网关 HTTPS 访问时，网关 Caddy 将 /svcmgr/* 反代到板子 8083（同源，避免混合内容）
+  if(location.protocol==='https:') return location.origin+'/svcmgr';
+  return location.protocol+'//'+location.hostname+':8083';
+}
+function mgrBase(m){ return (m.base||'').replace(/\/+$/,''); }
+function apiURL(m,path){
+  return mgrBase(m)+'/api/'+path+(path.includes('?')?'&':'?')+'token='+encodeURIComponent(m.token||'');
+}
+async function svcGet(m,path){ const r=await fetch(apiURL(m,path)); if(!r.ok) throw new Error(r.status); return r.text(); }
+async function svcPost(m,path,body){ const r=await fetch(apiURL(m,path),{method:'POST',body:body||''}); if(!r.ok) throw new Error(r.status); return r.text(); }
+
+function renderMgrs(){
+  const cols=document.getElementById('cols');
+  cols.innerHTML='';
+  if(!MGRS.length){ cols.innerHTML='<div class="hint" style="padding:20px">尚未添加。点击左上角“+ 添加 SvcManager”。</div>'; return; }
+  MGRS.forEach(m=>cols.appendChild(buildCol(m)));
+  MGRS.forEach(m=>loadCol(m.id));
+}
+function buildCol(m){
+  const d=document.createElement('div');
+  d.className='mgr'; d.id='col-'+m.id;
+  d.innerHTML=
+    '<header>'+
+      '<span class="dot" id="mdot-'+m.id+'"></span>'+
+      '<b>'+esc(m.name)+'</b>'+
+      '<span class="u" title="'+esc(mgrBase(m))+'">'+esc(mgrBase(m))+'</span>'+
+      '<span class="sp"></span>'+
+      '<button class="g mini" onclick="editMgr(\''+m.id+'\')">改</button>'+
+      '<button class="g mini" onclick="delMgr(\''+m.id+'\')">×</button>'+
+    '</header>'+
+    '<div class="body" id="mbody-'+m.id+'"><div class="hint">加载中…</div></div>'+
+    '<footer><button class="mini" onclick="addInst(\''+m.id+'\')">+ 实例</button> '+
+      '<button class="g mini" onclick="loadCol(\''+m.id+'\')">刷新</button></footer>';
+  return d;
+}
+async function loadCol(id){
+  const m=MGRS.find(x=>x.id===id); if(!m) return;
+  const body=document.getElementById('mbody-'+id); if(!body) return;
+  const dot=document.getElementById('mdot-'+id);
+  try{
+    const list=JSON.parse(await svcGet(m,'list'));
+    if(dot) dot.classList.add('on');
+    body.innerHTML = list.length? '' : '<div class="hint">无实例</div>';
+    list.forEach(s=>{
+      const it=document.createElement('div'); it.className='it';
+      const run=!!s.running;
+      it.innerHTML=
+        '<div class="h"><span class="dot '+(run?'on':'')+'"></span>'+
+          '<span class="n">'+esc(s.name)+(s.auto?' <span style="color:#8bd">[自愈]</span>':'')+'</span>'+
+          '<span class="hint" style="margin:0">'+(run?('pid '+s.pid):'停止')+'</span></div>'+
+        '<div class="p" title="'+esc(s.bin)+'">'+esc(s.bin)+'</div>'+
+        '<div class="p" title="'+esc(s.config)+'">'+esc(s.config)+'</div>'+
+        '<div class="row" style="margin:4px 0 0">'+
+          '<button class="mini" onclick="act(\''+id+'\',\'start\',\''+jsq(s.name)+'\')">启动</button>'+
+          '<button class="g mini" onclick="act(\''+id+'\',\'stop\',\''+jsq(s.name)+'\')">停止</button>'+
+          '<button class="g mini" onclick="act(\''+id+'\',\'restart\',\''+jsq(s.name)+'\')">重启</button>'+
+          '<button class="g mini" onclick="editCfg(\''+id+'\',\''+jsq(s.name)+'\')">配置</button>'+
+          '<button class="g mini" onclick="showLog(\''+id+'\',\''+jsq(s.name)+'\')">日志</button>'+
+          '<button class="r mini" onclick="delInst(\''+id+'\',\''+jsq(s.name)+'\')">删</button>'+
+        '</div>';
+      body.appendChild(it);
+    });
+  }catch(e){
+    if(dot) dot.classList.remove('on');
+    body.innerHTML='<div class="hint" style="color:#e88">连接失败: '+esc(''+e)+'<br>'+esc(mgrBase(m))+'</div>';
+  }
+}
+async function act(id,op,name){
+  const m=MGRS.find(x=>x.id===id);
+  try{ await svcGet(m,op+'?name='+encodeURIComponent(name)); }catch(e){ alert('操作失败: '+e); }
+  setTimeout(()=>loadCol(id),300);
+}
+async function delInst(id,name){
+  if(!confirm('删除实例 '+name+' ?')) return;
+  const m=MGRS.find(x=>x.id===id);
+  try{ await svcGet(m,'del?name='+encodeURIComponent(name)); }catch(e){}
+  loadCol(id);
+}
+function delMgr(id){
+  if(!confirm('移除该 SvcManager 栏（不影响板子上的服务）？')) return;
+  MGRS=MGRS.filter(x=>x.id!==id); saveMgrList(); renderMgrs();
+}
+
+/* manager add/edit modal */
+function editMgr(id){
+  const m=id?MGRS.find(x=>x.id===id):null;
+  const cur=m||{name:'SvcManager',local:true,base:localBase(),token:''};
+  const isLocal = cur.local!==undefined?cur.local:(cur.base===localBase());
+  openModal(
+    '<h3>'+(m?'编辑':'添加')+' SvcManager 栏</h3>'+
+    '<label>名称</label><input id="m_name" value="'+esc(cur.name)+'">'+
+    '<label>类型</label>'+
+    '<select id="m_type" onchange="mgrTypeChange()">'+
+      '<option value="local"'+(isLocal?' selected':'')+'>本地（本机 svcmgr）</option>'+
+      '<option value="remote"'+(!isLocal?' selected':'')+'>指定地址</option>'+
+    '</select>'+
+    '<div id="m_addr_wrap"><label>地址</label>'+
+      '<input id="m_base" value="'+esc(cur.base)+'" placeholder="http://192.168.0.103:18083">'+
+      '<div class="hint">本地自动走同源 /svcmgr（HTTPS）或 host:8083（HTTP）。跨机/其它 svcmgr 填完整地址，如 http://192.168.0.103:18083</div></div>'+
+    '<label>API Token</label><input id="m_token" value="'+esc(cur.token)+'" placeholder="见 /userdata/services/token">'+
+    '<div id="m_msg" class="msg" style="color:#8f8"></div>'+
+    '<div class="foot"><button class="g" onclick="mgrTest()">测试连接</button>'+
+      '<button class="g" onclick="closeModal()">取消</button>'+
+      '<button onclick="mgrSave(\''+(id||'')+'\')">保存</button></div>'
+  );
+  mgrTypeChange();
+}
+function mgrTypeChange(){
+  const local=document.getElementById('m_type').value==='local';
+  const wrap=document.getElementById('m_addr_wrap');
+  const base=document.getElementById('m_base');
+  wrap.style.opacity=local?'.5':'1';
+  base.disabled=local;
+  if(local) base.value=localBase();
+}
+function readMgrForm(){
+  const local=document.getElementById('m_type').value==='local';
+  return {
+    name:document.getElementById('m_name').value.trim()||'SvcManager',
+    local:local,
+    base:local?localBase():document.getElementById('m_base').value.trim(),
+    token:document.getElementById('m_token').value.trim()
+  };
+}
+async function mgrTest(){
+  const m=readMgrForm(), msg=document.getElementById('m_msg');
+  msg.style.color='#8f8'; msg.textContent='测试中…';
+  try{ const t=await svcGet(m,'list'); JSON.parse(t); msg.style.color='#8f8'; msg.textContent='连接成功 ✓'; }
+  catch(e){ msg.style.color='#e88'; msg.textContent='连接失败: '+e; }
+}
+function mgrSave(id){
+  const v=readMgrForm();
+  if(id){ const m=MGRS.find(x=>x.id===id); Object.assign(m,v); }
+  else MGRS.push(Object.assign({id:''+Date.now()},v));
+  saveMgrList(); closeModal(); renderMgrs();
+}
+
+/* instance add modal */
+function addInst(id){
+  const m=MGRS.find(x=>x.id===id); if(!m) return;
+  openModal(
+    '<h3>添加实例 · '+esc(m.name)+'</h3>'+
+    '<label>名称</label><input id="i_name" placeholder="frpc-alt">'+
+    '<label>程序路径</label><input id="i_bin" placeholder="/usr/local/bin/frpc">'+
+    '<label>配置文件</label><input id="i_cfg" placeholder="/userdata/apps/frp/alt.toml">'+
+    '<label style="display:flex;gap:6px;align-items:center;color:#9aa">'+
+      '<input type="checkbox" id="i_auto" style="width:auto;margin:0"> 开机自启并在崩溃后自动重启（自愈）</label>'+
+    '<div id="i_msg" class="msg" style="color:#e88"></div>'+
+    '<div class="foot"><button class="g" onclick="closeModal()">取消</button>'+
+      '<button onclick="saveInst(\''+id+'\')">添加</button></div>'
+  );
+}
+async function saveInst(id){
+  const m=MGRS.find(x=>x.id===id);
+  let name=document.getElementById('i_name').value.trim();
+  const bin=document.getElementById('i_bin').value.trim();
+  const cfg=document.getElementById('i_cfg').value.trim();
+  const auto=document.getElementById('i_auto').checked;
+  const msg=document.getElementById('i_msg');
+  if(!name||!bin){ msg.textContent='名称与程序路径必填'; return; }
+  if(auto && name[0]!=='*') name='*'+name;
+  try{
+    const r=await svcGet(m,'add?name='+encodeURIComponent(name)+'&bin='+encodeURIComponent(bin)+'&config='+encodeURIComponent(cfg));
+    if(r.trim()!=='ok'){ msg.textContent='失败: '+r; return; }
+    closeModal(); loadCol(id);
+  }catch(e){ msg.textContent='失败: '+e; }
+}
+
+/* config / log modal */
+async function editCfg(id,name){
+  const m=MGRS.find(x=>x.id===id);
+  let content='';
+  try{ content=await svcGet(m,'config?name='+encodeURIComponent(name)); }catch(e){ content='(读取失败: '+e+')'; }
+  openModal(
+    '<h3>配置 · '+esc(name)+'</h3>'+
+    '<textarea id="c_box" style="height:340px">'+esc(content)+'</textarea>'+
+    '<div id="c_msg" class="msg" style="color:#8f8"></div>'+
+    '<div class="foot"><button class="g" onclick="closeModal()">关闭</button>'+
+      '<button onclick="saveCfg(\''+id+'\',\''+jsq(name)+'\')">保存并重启</button></div>'
+  );
+}
+async function saveCfg(id,name){
+  const m=MGRS.find(x=>x.id===id), msg=document.getElementById('c_msg');
+  const body=document.getElementById('c_box').value;
+  try{
+    await svcPost(m,'config?name='+encodeURIComponent(name),body);
+    await svcGet(m,'restart?name='+encodeURIComponent(name));
+    msg.textContent='已保存并重启'; loadCol(id);
+  }catch(e){ msg.style.color='#e88'; msg.textContent='失败: '+e; }
+}
+async function showLog(id,name){
+  const m=MGRS.find(x=>x.id===id);
+  let log='';
+  try{ log=await svcGet(m,'log?name='+encodeURIComponent(name)); }catch(e){ log='(读取失败: '+e+')'; }
+  openModal('<h3>日志 · '+esc(name)+'</h3><pre style="background:#050506;border:1px solid #26262c;border-radius:8px;padding:8px;max-height:60vh;overflow:auto;white-space:pre-wrap;font-size:12px">'+esc(log)+'</pre>'+
+    '<div class="foot"><button class="g" onclick="closeModal()">关闭</button></div>');
+}
+
+/* ---------------- modal + utils ---------------- */
+function openModal(html){
+  const o=document.createElement('div'); o.className='overlay'; o.onclick=e=>{ if(e.target===o) closeModal(); };
+  o.innerHTML='<div class="modal">'+html+'</div>';
+  document.body.appendChild(o);
+}
+function closeModal(){ const o=document.querySelector('.overlay'); if(o) o.remove(); }
+function esc(s){ return (''+s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function jsq(s){ return (''+s).replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
+
 loadStatus();
+renderMgrs();
 </script>
 </body>
 </html>

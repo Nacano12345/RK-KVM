@@ -25,3 +25,6 @@
 /passwd
 deploy/passwd
 *.bak
+
+# extra (not synced to git): standalone service manager
+/extra/
