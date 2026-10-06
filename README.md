@@ -1,3 +1,5 @@
+[English](README.en.md) | 中文
+
 # RK-KVM
 
 在 **创龙 TL3506-MiniEVM-NAND（瑞芯微 RK3506，armv7l）** 上实现的 **用户态 IP-KVM**：
