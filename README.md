@@ -135,4 +135,4 @@ https://<gateway>:18443 {
 
 ## 许可
 
-未附带许可证文件；如需开源请自行添加（如 MIT）。
+[MIT](LICENSE) © 2026 Nacano12345
