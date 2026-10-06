@@ -204,6 +204,13 @@ https://<gateway>:18443 {
 - The admin console runs arbitrary commands as root — extremely powerful; use it only on a trusted
   network and always change the default password.
 
+## Acknowledgements
+
+Some inspiration comes from the excellent open-source IP-KVM projects below — with respect:
+
+- **PiKVM** — <https://github.com/pikvm/pikvm> (<https://pikvm.org>)
+- **OneKVM** — <https://github.com/mofeng-git/One-KVM>
+
 ## License
 
 [MIT](LICENSE) © 2026 Nacano12345

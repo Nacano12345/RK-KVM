@@ -192,6 +192,13 @@ https://<gateway>:18443 {
 - 浏览器播放音频需用户手势触发（首次点击页面后才会出声）。
 - 维护后台以 root 执行任意命令，权限极大，请仅在可信网络使用，务必修改默认密码。
 
+## 致谢
+
+部分灵感来源于以下优秀的开源 IP-KVM 项目，在此致意：
+
+- **PiKVM** —— <https://github.com/pikvm/pikvm>（<https://pikvm.org>）
+- **OneKVM** —— <https://github.com/mofeng-git/One-KVM>
+
 ## 许可
 
 [MIT](LICENSE) © 2026 Nacano12345
