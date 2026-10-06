@@ -831,6 +831,10 @@ static void *ep0_thread(void *arg)
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK) {
+				usleep(2000);	/* transient; keep serving events */
+				continue;
+			}
 			perror("ep0 read");
 			break;
 		}
