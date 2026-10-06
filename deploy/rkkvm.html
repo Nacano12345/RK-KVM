@@ -119,6 +119,8 @@
       <div class="grp"><label>视频</label>
         <select id="vmode"><option value="mjpeg" selected>MJPEG</option><option value="ws">WebSocket</option></select>
       </div>
+      <div class="grp"><label style="min-width:0"><input type="checkbox" id="autoRefresh" checked> 自动刷新视频流</label>
+        <button id="vrefresh" class="gray">刷新</button></div>
       <div class="grp"><label>编码</label>
         <select id="enc"><option value="0" selected>直通</option><option value="1">压缩(软编)</option></select>
         <input id="q" type="range" min="20" max="95" value="60" style="display:none;width:110px">
@@ -299,8 +301,14 @@ function srcWH(){ return vmode==='ws' ? [wsFrame.width,wsFrame.height] : [img.na
 function srcDraw(c2,sx,sy,sw,sh,dx,dy,dw,dh){ c2.drawImage(vmode==='ws'?wsFrame:img, sx,sy,sw,sh, dx,dy,dw,dh); }
 videoStart();
 
+// auto reset/refresh of the video stream if it stalls
+let autoRefresh = mem.get('autoRefresh', true);
+const arChk=document.getElementById('autoRefresh'), vrBtn=document.getElementById('vrefresh');
+if(arChk){ arChk.checked=autoRefresh; arChk.addEventListener('change',()=>{ autoRefresh=arChk.checked; mem.set('autoRefresh',autoRefresh); }); }
+if(vrBtn) vrBtn.addEventListener('click',()=>videoStart());
+
 // ---------- status ----------
-let lastTx=0,lastT=0,cfgLoaded=false;
+let lastTx=0,lastT=0,cfgLoaded=false,lastFrameSeq=-1,lastFrameT=performance.now();
 function poll(){
   fetch('/status').then(r=>r.text()).then(t=>{
     const m=t.match(/tx (\d+)/);
@@ -309,6 +317,12 @@ function poll(){
         statusEl.textContent=t.split(',').slice(0,2).join(',').trim()+` | ≈${mbps.toFixed(1)} Mbps `+(t.includes('hid=up')?'| HID✓':''); }
       else {lastTx=tx;lastT=now;}
     } else statusEl.textContent=t.trim();
+    // stall watchdog: if the server frame counter stops advancing, reset the video
+    const fm=t.match(/frame (\d+)/);
+    if(fm){ const seq=+fm[1], now=performance.now();
+      if(seq!==lastFrameSeq){ lastFrameSeq=seq; lastFrameT=now; }
+      else if(autoRefresh && now-lastFrameT>4500){ lastFrameT=now; try{videoStart();}catch(_){} }
+    }
     const pw=t.match(/pwr=(-?\d+)/),pg=t.match(/pgpio=(-?\d+)/),rg=t.match(/rgpio=(-?\d+)/),sg=t.match(/sgpio=(-?\d+)/);
     if(pw){ const v=+pw[1], d=document.getElementById('pwrdot');
       if(v===1){d.className='dot on';d.style.background='';}
@@ -397,8 +411,7 @@ modeSel.value = mem.get('mode','abs'); mode=modeSel.value;
 modeSel.addEventListener('change',()=>{ mode=modeSel.value; mem.set('mode',mode); if(mode==='abs'&&document.pointerLockElement)document.exitPointerLock(); });
 async function setActive(on){
   active=on; ctrl.textContent=on?'停止控制':'启用控制'; ctrl.className=on?'':'off';
-  if(on){ if(!document.fullscreenElement){try{await(wrap.requestFullscreen?wrap.requestFullscreen({navigationUI:'hide'}):Promise.resolve());}catch(e){}}
-    if(keylockChk.checked)await setKeyLock(true);
+  if(on){ if(keylockChk.checked)await setKeyLock(true);
     if(mode==='rel'){cv.focus();cv.requestPointerLock();} }
   else { setKeyLock(false); physMod=0; updateInds(); if(document.pointerLockElement)document.exitPointerLock(); }
 }
