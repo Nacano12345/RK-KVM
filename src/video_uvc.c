@@ -635,18 +635,22 @@ static int read_all(int fd, void *buf, size_t len)
 
 static void serve_status(int c)
 {
-	char body[192], hdr[224];
+	char body[256], hdr[288];
 	int bm = __atomic_load_n(&g_enc_mode, __ATOMIC_RELAXED);
 	int bq = __atomic_load_n(&g_quality, __ATOMIC_RELAXED);
 	int pwr = cfg_status >= 0 ? gpio_read(cfg_status) : -1;
+	int caps = -1, num = -1;
+	char rep[64] = {0};
+	if (hid_cmd("led", 3, rep, sizeof rep) == 0)
+		sscanf(rep, "led %d %d", &caps, &num);
 	int bl = snprintf(body, sizeof body,
-		"MJPEG %dx%d @%d fps, frame %lu, tx %llu, hid=%s, enc=%s%d, sz=%zu, pwr=%d, pgpio=%d, rgpio=%d, sgpio=%d\n",
+		"MJPEG %dx%d @%d fps, frame %lu, tx %llu, hid=%s, enc=%s%d, sz=%zu, pwr=%d, pgpio=%d, rgpio=%d, sgpio=%d, caps=%d, num=%d\n",
 		g_width, g_height, g_fps, g_seq,
 		__atomic_load_n(&g_tx_bytes, __ATOMIC_RELAXED),
 		hid_fd >= 0 ? "up" : "down",
 		bm ? "q" : "pass", bm ? bq : 0,
 		__atomic_load_n(&g_jpeg_len, __ATOMIC_RELAXED),
-		pwr, cfg_power, cfg_reset, cfg_status);
+		pwr, cfg_power, cfg_reset, cfg_status, caps, num);
 	int hl = snprintf(hdr, sizeof hdr,
 		"HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n"
 		"Access-Control-Allow-Origin: *\r\n"

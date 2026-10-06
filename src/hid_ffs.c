@@ -49,19 +49,46 @@
 
 static const char *g_udc = UDC_DEFAULT;
 static int ep0_fd = -1, kbd_fd = -1, mouse_fd = -1, abs_fd = -1, cons_fd = -1;
+static int led_fd = -1;
+static volatile int g_caps = 0, g_num = 0;
+static void *led_thread(void *arg);
+
+static void *led_thread(void *arg)
+{
+	(void)arg;
+	uint8_t b[8];
+	for (;;) {
+		ssize_t n = read(led_fd, b, sizeof b);
+		if (n <= 0) {
+			if (errno == EINTR)
+				continue;
+			if (errno == EAGAIN || errno == EWOULDBLOCK ||
+			    errno == EIDRM || errno == ENODEV ||
+			    errno == ESHUTDOWN) {
+				usleep(2000);
+				continue;
+			}
+			break;
+		}
+		g_num = (b[0] & 0x01) ? 1 : 0;	/* Num Lock LED */
+		g_caps = (b[0] & 0x02) ? 1 : 0;	/* Caps Lock LED */
+	}
+	return NULL;
+}
 static volatile int g_enabled = 0;
 static volatile sig_atomic_t g_stop = 0;
 
 /* Per-endpoint writer mailbox: the command thread only posts the latest
  * report; a dedicated thread does the (possibly blocking) FFS write so a
  * stuck endpoint can never wedge the control server. */
+#define EPRING 32
 struct eplink {
 	int fd;
 	pthread_mutex_t m;
 	pthread_cond_t c;
-	uint8_t buf[16];
-	int len;
-	int has;
+	uint8_t buf[EPRING][16];
+	int len[EPRING];
+	int head, tail, count;
 };
 static struct eplink g_ep_kbd, g_ep_mouse, g_ep_abs, g_ep_cons;
 
@@ -70,12 +97,13 @@ static void *ep_writer(void *arg)
 	struct eplink *e = arg;
 	for (;;) {
 		pthread_mutex_lock(&e->m);
-		while (!e->has)
+		while (e->count == 0)
 			pthread_cond_wait(&e->c, &e->m);
-		int l = e->len;
 		uint8_t b[16];
-		memcpy(b, e->buf, l);
-		e->has = 0;
+		int l = e->len[e->head];
+		memcpy(b, e->buf[e->head], l);
+		e->head = (e->head + 1) % EPRING;
+		e->count--;
 		pthread_mutex_unlock(&e->m);
 		if (g_enabled && e->fd >= 0)
 			(void)write(e->fd, b, l);
@@ -87,12 +115,17 @@ static void ep_post(struct eplink *e, const uint8_t *data, int len)
 {
 	if (e->fd < 0)
 		return;
-	if (len > (int)sizeof e->buf)
-		len = sizeof e->buf;
+	if (len > 16)
+		len = 16;
 	pthread_mutex_lock(&e->m);
-	memcpy(e->buf, data, len);
-	e->len = len;
-	e->has = 1;
+	if (e->count == EPRING) {	/* full: drop oldest */
+		e->head = (e->head + 1) % EPRING;
+		e->count--;
+	}
+	memcpy(e->buf[e->tail], data, len);
+	e->len[e->tail] = len;
+	e->tail = (e->tail + 1) % EPRING;
+	e->count++;
 	pthread_cond_signal(&e->c);
 	pthread_mutex_unlock(&e->m);
 }
@@ -100,8 +133,7 @@ static void ep_post(struct eplink *e, const uint8_t *data, int len)
 static void ep_init(struct eplink *e, int fd)
 {
 	e->fd = fd;
-	e->len = 0;
-	e->has = 0;
+	e->head = e->tail = e->count = 0;
 	pthread_mutex_init(&e->m, NULL);
 	pthread_cond_init(&e->c, NULL);
 	pthread_t th;
@@ -240,6 +272,7 @@ struct usb_hid_desc {
 #define LE32(x) ((__le32)(uint32_t)(x))
 
 #define KBD_EP_ADDR	0x81
+#define KBD_OUT_EP_ADDR	0x01
 #define MOUSE_EP_ADDR	0x82
 #define ABS_EP_ADDR	0x83
 #define CONS_EP_ADDR	0x84
@@ -248,6 +281,7 @@ struct speed_descs {
 	struct usb_interface_descriptor kbd_intf;
 	struct usb_hid_desc kbd_hid;
 	struct usb_endpoint_descriptor_no_audio kbd_ep;
+	struct usb_endpoint_descriptor_no_audio kbd_out_ep;
 	struct usb_interface_descriptor mouse_intf;
 	struct usb_hid_desc mouse_hid;
 	struct usb_endpoint_descriptor_no_audio mouse_ep;
@@ -271,15 +305,15 @@ static const struct {
 		.length = LE32(sizeof g_descs),
 		.flags = LE32(FUNCTIONFS_HAS_FS_DESC | FUNCTIONFS_HAS_HS_DESC),
 	},
-	.fs_count = LE32(12),
-	.hs_count = LE32(12),
+	.fs_count = LE32(13),
+	.hs_count = LE32(13),
 	.fs = {
 		.kbd_intf = {
 			.bLength = sizeof(struct usb_interface_descriptor),
 			.bDescriptorType = USB_DT_INTERFACE,
 			.bInterfaceNumber = 0,
 			.bAlternateSetting = 0,
-			.bNumEndpoints = 1,
+			.bNumEndpoints = 2,
 			.bInterfaceClass = USB_CLASS_HID,
 			.bInterfaceSubClass = 1,   /* boot */
 			.bInterfaceProtocol = 1,   /* keyboard */
@@ -298,6 +332,14 @@ static const struct {
 			.bLength = sizeof(struct usb_endpoint_descriptor_no_audio),
 			.bDescriptorType = USB_DT_ENDPOINT,
 			.bEndpointAddress = KBD_EP_ADDR,
+			.bmAttributes = USB_ENDPOINT_XFER_INT,
+			.wMaxPacketSize = LE16(8),
+			.bInterval = 10,
+		},
+		.kbd_out_ep = {
+			.bLength = sizeof(struct usb_endpoint_descriptor_no_audio),
+			.bDescriptorType = USB_DT_ENDPOINT,
+			.bEndpointAddress = KBD_OUT_EP_ADDR,
 			.bmAttributes = USB_ENDPOINT_XFER_INT,
 			.wMaxPacketSize = LE16(8),
 			.bInterval = 10,
@@ -412,6 +454,14 @@ static const struct {
 			.bLength = sizeof(struct usb_endpoint_descriptor_no_audio),
 			.bDescriptorType = USB_DT_ENDPOINT,
 			.bEndpointAddress = KBD_EP_ADDR,
+			.bmAttributes = USB_ENDPOINT_XFER_INT,
+			.wMaxPacketSize = LE16(8),
+			.bInterval = 8,
+		},
+		.kbd_out_ep = {
+			.bLength = sizeof(struct usb_endpoint_descriptor_no_audio),
+			.bDescriptorType = USB_DT_ENDPOINT,
+			.bEndpointAddress = KBD_OUT_EP_ADDR,
 			.bmAttributes = USB_ENDPOINT_XFER_INT,
 			.wMaxPacketSize = LE16(8),
 			.bInterval = 8,
@@ -652,27 +702,39 @@ static int open_ffs(void)
 		return -1;
 	}
 	snprintf(path, sizeof path, "%s/ep2", FFS_MNT);
-	mouse_fd = open(path, O_RDWR);
-	if (mouse_fd < 0) {
-		perror("open ep2 (mouse)");
+	led_fd = open(path, O_RDWR);
+	if (led_fd < 0) {
+		perror("open ep2 (kbd led)");
 		return -1;
 	}
 	snprintf(path, sizeof path, "%s/ep3", FFS_MNT);
-	abs_fd = open(path, O_RDWR);
-	if (abs_fd < 0) {
-		perror("open ep3 (abs mouse)");
+	mouse_fd = open(path, O_RDWR);
+	if (mouse_fd < 0) {
+		perror("open ep3 (mouse)");
 		return -1;
 	}
 	snprintf(path, sizeof path, "%s/ep4", FFS_MNT);
+	abs_fd = open(path, O_RDWR);
+	if (abs_fd < 0) {
+		perror("open ep4 (abs mouse)");
+		return -1;
+	}
+	snprintf(path, sizeof path, "%s/ep5", FFS_MNT);
 	cons_fd = open(path, O_RDWR);
 	if (cons_fd < 0) {
-		perror("open ep4 (consumer)");
+		perror("open ep5 (consumer)");
 		return -1;
 	}
 	ep_init(&g_ep_kbd, kbd_fd);
 	ep_init(&g_ep_mouse, mouse_fd);
 	ep_init(&g_ep_abs, abs_fd);
 	ep_init(&g_ep_cons, cons_fd);
+	/* read keyboard LED output reports in a dedicated thread */
+	{
+		pthread_t lt;
+		if (pthread_create(&lt, NULL, led_thread, NULL) == 0)
+			pthread_detach(lt);
+	}
 	return 0;
 }
 
@@ -945,6 +1007,9 @@ static void handle_command(char *line, char *reply, size_t rlen)
 		consumer_send(0);
 		snprintf(reply, rlen, "ok\n");
 		return;
+	} else if (!strcmp(cmd, "led")) {
+		snprintf(reply, rlen, "led %d %d\n", g_caps, g_num);
+		return;
 	} else if (!strcmp(cmd, "mb")) {
 		if (sscanf(line, "%*s %d", &n) == 1) {
 			g_mouse_btn = (uint8_t)n;
@@ -1053,9 +1118,11 @@ int main(int argc, char **argv)
 		close(abs_fd);
 	if (cons_fd >= 0)
 		close(cons_fd);
+	if (led_fd >= 0)
+		close(led_fd);
 	if (ep0_fd >= 0)
 		close(ep0_fd);
-	kbd_fd = mouse_fd = abs_fd = cons_fd = ep0_fd = -1;
+	kbd_fd = mouse_fd = abs_fd = cons_fd = led_fd = ep0_fd = -1;
 	/* Do NOT unbind the UDC here: on this kernel, unbinding the ffs
 	 * gadget after use can wedge configfs. configfs is reset on reboot. */
 	return 0;

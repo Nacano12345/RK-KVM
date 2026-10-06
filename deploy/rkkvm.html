@@ -380,6 +380,13 @@ function poll(){
       else {d.className='dot';d.style.background='';}
       document.getElementById('pwrind').title=v<0?'未配置状态脚':(v?'电源：开':'电源：关'); }
     if(!cfgLoaded&&pg&&rg&&sg){ cfgLoaded=true; pgpio.value=pg[1]; rgpio.value=rg[1]; document.getElementById('sgpio').value=sg[1]; }
+    // real LED state from the target (HID output report) -> sync indicators
+    const cm=t.match(/caps=(-?\d+)/), nm=t.match(/num=(-?\d+)/);
+    if(cm && nm){ const c=+cm[1], n=+nm[1];
+      if(c>=0) capsOn=(c===1);
+      if(n>=0) numOn=(n===1);
+      try{ updateInds(); }catch(_){}
+    }
   }).catch(()=>statusEl.textContent='视频离线');
 }
 poll(); setInterval(poll,2000);
