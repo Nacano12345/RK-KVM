@@ -820,13 +820,13 @@ static void ws_pong(int c)
 	send_all(c, f, 2);
 }
 
-static void ws_serve(int c, char *req)
+static int ws_accept(int c, char *req)
 {
 	char *k = strcasestr(req, "Sec-WebSocket-Key:");
 	if (!k) {
 		const char *bad = "HTTP/1.1 400 Bad Request\r\nContent-Length:0\r\n\r\n";
 		send_all(c, bad, strlen(bad));
-		return;
+		return -1;
 	}
 	k += strlen("Sec-WebSocket-Key:");
 	while (*k == ' ')
@@ -851,6 +851,13 @@ static void ws_serve(int c, char *req)
 		"Upgrade: websocket\r\nConnection: Upgrade\r\n"
 		"Sec-WebSocket-Accept: %s\r\n\r\n", accept);
 	if (send_all(c, resp, rl) < 0)
+		return -1;
+	return 0;
+}
+
+static void ws_serve(int c, char *req)
+{
+	if (ws_accept(c, req) != 0)
 		return;
 
 	/* frame loop */
@@ -895,6 +902,50 @@ static void ws_serve(int c, char *req)
 			hid_cmd(payload, len, reply, sizeof reply);
 		}
 	}
+}
+
+/* WebSocket video: push each new JPEG frame as a binary message */
+static void ws_video_serve(int c, char *req)
+{
+	if (ws_accept(c, req) != 0)
+		return;
+	unsigned long last = 0;
+	uint8_t *buf = NULL;
+	size_t cap = 0;
+	while (!g_stop) {
+		pthread_mutex_lock(&lock);
+		while (g_seq == last && !g_stop)
+			pthread_cond_wait(&cond, &lock);
+		last = g_seq;
+		size_t len = g_jpeg_len;
+		if (len > cap) {
+			uint8_t *nb = realloc(buf, len);
+			if (!nb) { pthread_mutex_unlock(&lock); break; }
+			buf = nb; cap = len;
+		}
+		if (len)
+			memcpy(buf, g_jpeg, len);
+		pthread_mutex_unlock(&lock);
+		if (!len)
+			continue;
+		uint8_t hdr[10];
+		int hl;
+		hdr[0] = 0x82;			/* FIN + binary */
+		if (len < 126) {
+			hdr[1] = (uint8_t)len; hl = 2;
+		} else if (len < 65536) {
+			hdr[1] = 126;
+			hdr[2] = (len >> 8) & 0xff; hdr[3] = len & 0xff; hl = 4;
+		} else {
+			hdr[1] = 127;
+			for (int i = 0; i < 8; i++)
+				hdr[2 + i] = (uint8_t)(len >> (56 - 8 * i));
+			hl = 10;
+		}
+		if (send_all(c, hdr, hl) < 0 || send_all(c, buf, len) < 0)
+			break;
+	}
+	free(buf);
 }
 
 /* ------------------------------ dispatch --------------------------------- */
@@ -992,7 +1043,8 @@ static void *client_thread(void *arg)
 			!strncmp(path, "/snapshot", 9) || !strncmp(path, "/status", 7) ||
 			!strncmp(path, "/setres", 7) || !strncmp(path, "/setenc", 7) ||
 			!strncmp(path, "/gpio", 5) || !strncmp(path, "/gpiocfg", 8) ||
-			!strncmp(path, "/ws", 3) || !strncmp(path, "/admin/exec", 11);
+			!strncmp(path, "/ws", 3) || !strncmp(path, "/vws", 4) ||
+			!strncmp(path, "/admin/exec", 11);
 		if (is_data)
 			send_401(c);
 		else
@@ -1083,6 +1135,8 @@ static void *client_thread(void *arg)
 		send_all(c, hdr, hl);
 	} else if (!strncmp(req, "GET /admin", 10)) {
 		serve_file(c, "/userdata/admin.html", "text/html; charset=utf-8");
+	} else if (!strncmp(req, "GET /vws", 8)) {
+		ws_video_serve(c, req);
 	} else if (!strncmp(req, "GET /ws", 7)) {
 		ws_serve(c, req);
 	} else if (!strncmp(req, "POST /api/hid", 13)) {

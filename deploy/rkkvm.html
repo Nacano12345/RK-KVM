@@ -116,6 +116,9 @@
     <div class="sec">
       <div class="grp"><label>分辨率</label><select id="res"></select></div>
       <div class="grp"><label>帧率</label><select id="fps"></select></div>
+      <div class="grp"><label>视频</label>
+        <select id="vmode"><option value="mjpeg" selected>MJPEG</option><option value="ws">WebSocket</option></select>
+      </div>
       <div class="grp"><label>编码</label>
         <select id="enc"><option value="0" selected>直通</option><option value="1">压缩(软编)</option></select>
         <input id="q" type="range" min="20" max="95" value="60" style="display:none;width:110px">
@@ -268,6 +271,34 @@ qRange.addEventListener('input', ()=>{ qv.textContent=qRange.value; });
 qRange.addEventListener('change', applyEnc);
 applyEnc();                         /* restore saved encoding to the server */
 
+// ---------- video transport: MJPEG (<img>) or WebSocket (/vws) ----------
+let vmode = mem.get('vmode','mjpeg'), vws=null, wsFrame=null, wsPending=false;
+const vmodeSel=document.getElementById('vmode');
+function videoStart(){
+  if(vws){ try{vws.close();}catch(_){} vws=null; }
+  if(vmode==='ws'){
+    img.removeAttribute('src');
+    const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/vws';
+    (function conn(){
+      vws=new WebSocket(url); vws.binaryType='blob';
+      vws.onmessage=async ev=>{ if(wsPending) return; wsPending=true;
+        try{ const bmp=await createImageBitmap(ev.data); if(wsFrame&&wsFrame.close)wsFrame.close(); wsFrame=bmp; }catch(_){}
+        wsPending=false; };
+      vws.onclose=()=>{ if(vmode==='ws') setTimeout(conn,1000); };
+      vws.onerror=()=>{};
+    })();
+  } else {
+    if(wsFrame){ if(wsFrame.close)wsFrame.close(); wsFrame=null; }
+    img.src='/stream?t='+Date.now();
+  }
+}
+vmodeSel.value=vmode;
+vmodeSel.addEventListener('change',()=>{ vmode=vmodeSel.value; mem.set('vmode',vmode); videoStart(); });
+function srcReady(){ return vmode==='ws' ? !!wsFrame : img.naturalWidth>0; }
+function srcWH(){ return vmode==='ws' ? [wsFrame.width,wsFrame.height] : [img.naturalWidth,img.naturalHeight]; }
+function srcDraw(c2,sx,sy,sw,sh,dx,dy,dw,dh){ c2.drawImage(vmode==='ws'?wsFrame:img, sx,sy,sw,sh, dx,dy,dw,dh); }
+videoStart();
+
 // ---------- status ----------
 let lastTx=0,lastT=0,cfgLoaded=false;
 function poll(){
@@ -303,9 +334,10 @@ function syncSliders(){
   ctv.textContent=Math.round(crop.t*100)+'%'; cbv.textContent=Math.round(crop.b*100)+'%';
 }
 function detect(){
-  if(!img.naturalWidth) return false;
-  const W=160,H=Math.max(1,Math.round(160*img.naturalHeight/img.naturalWidth));
-  detectCv.width=W; detectCv.height=H; dctx.drawImage(img,0,0,W,H);
+  if(!srcReady()) return false;
+  const [SW,SH]=srcWH();
+  const W=160,H=Math.max(1,Math.round(160*SH/SW));
+  detectCv.width=W; detectCv.height=H; srcDraw(dctx,0,0,SW,SH,0,0,W,H);
   let d; try{ d=dctx.getImageData(0,0,W,H).data; }catch(e){ return false; }
   const thr=22, isBlack=i=>d[i]<thr&&d[i+1]<thr&&d[i+2]<thr;
   const colFrac=x=>{let c=0;for(let y=0;y<H;y++)if(!isBlack((y*W+x)*4))c++;return c/H;};
@@ -331,14 +363,14 @@ syncSliders();
 
 // ---------- render ----------
 function draw(){
-  if(img.naturalWidth>0){
-    const sw=img.naturalWidth,sh=img.naturalHeight;
+  if(srcReady()){
+    const [sw,sh]=srcWH();
     const sx=Math.round(crop.l*sw),sy=Math.round(crop.t*sh);
     const cw=Math.max(2,Math.round((1-crop.l-crop.r)*sw)),ch=Math.max(2,Math.round((1-crop.t-crop.b)*sh));
     const scale=Math.min(wrap.clientWidth/cw,wrap.clientHeight/ch);
     const outW=Math.max(1,Math.round(cw*scale)),outH=Math.max(1,Math.round(ch*scale));
     if(cv.width!==outW||cv.height!==outH){ cv.width=outW; cv.height=outH; }
-    ctx.drawImage(img,sx,sy,cw,ch,0,0,outW,outH);
+    srcDraw(ctx,sx,sy,cw,ch,0,0,outW,outH);
   }
   requestAnimationFrame(draw);
 }
