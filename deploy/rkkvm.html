@@ -109,7 +109,8 @@
       </div>
       <div class="grp"><button id="fs" class="gray">全屏</button>
         <label style="min-width:0"><input type="checkbox" id="keylock"> 全键捕获</label>
-        <label style="min-width:0"><input type="checkbox" id="audioOn"> 音频</label></div>
+        <label style="min-width:0"><input type="checkbox" id="audioOn"> 音频</label>
+        <select id="audiosrc"><option value="uac" selected>HDMI(UAC)</option><option value="alsa">板载(ALSA)</option></select></div>
     </div>
   </details>
   <details open>
@@ -319,10 +320,12 @@ if(vrBtn) vrBtn.addEventListener('click',()=>videoStart());
 // ---------- audio (WebSocket /aws -> Web Audio, 48k s16le stereo) ----------
 let aws=null, actx=null, aProc=null, aRing=null, aR=0, aW=0;
 const audioEnabled0 = mem.get('audio', false);
+let audioSrc = mem.get('audiosrc','uac');
 function audioStart(){
   if(aws) return;
   aRing=new Float32Array(1<<17); aR=0; aW=0;
-  const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/aws';
+  const url=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/aws'
+    + (audioSrc==='alsa' ? '?src=alsa' : '');
   aws=new WebSocket(url); aws.binaryType='arraybuffer';
   aws.onmessage=ev=>{
     const dv=new DataView(ev.data), n=dv.byteLength>>1, mask=aRing.length-1;
@@ -357,6 +360,12 @@ if(audioChk){
   audioChk.addEventListener('change',()=>{ mem.set('audio',audioChk.checked);
     if(audioChk.checked) audioStart(); else audioStop(); });
   if(audioEnabled0) audioStart();
+}
+const audioSrcSel=document.getElementById('audiosrc');
+if(audioSrcSel){
+  audioSrcSel.value=audioSrc;
+  audioSrcSel.addEventListener('change',()=>{ audioSrc=audioSrcSel.value; mem.set('audiosrc',audioSrc);
+    if(aws){ audioStop(); audioStart(); } });
 }
 
 // ---------- status ----------

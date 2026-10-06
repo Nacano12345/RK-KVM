@@ -999,7 +999,9 @@ static void ws_audio_serve(int c, char *req)
 {
 	if (ws_accept(c, req) != 0)
 		return;
-	int fd = open("/run/rk.pcm", O_RDONLY);	/* blocks until arecord writes */
+	/* src=alsa -> board ALSA FIFO; default -> UAC (HDMI audio) FIFO */
+	const char *fifo = strstr(req, "src=alsa") ? "/run/rk2.pcm" : "/run/rk.pcm";
+	int fd = open(fifo, O_RDONLY);	/* blocks until a capture writes */
 	if (fd < 0)
 		return;
 	uint8_t buf[4096];
