@@ -308,21 +308,27 @@ if(arChk){ arChk.checked=autoRefresh; arChk.addEventListener('change',()=>{ auto
 if(vrBtn) vrBtn.addEventListener('click',()=>videoStart());
 
 // ---------- status ----------
-let lastTx=0,lastT=0,cfgLoaded=false,lastFrameSeq=-1,lastFrameT=performance.now();
+let lastTx=0,lastT=0,prevSeq=-1,prevSeqT=0,stallSeq=-1,stallT=performance.now(),cfgLoaded=false;
 function poll(){
   fetch('/status').then(r=>r.text()).then(t=>{
+    const now=performance.now();
+    let mbps=null, fps=null;
     const m=t.match(/tx (\d+)/);
-    if(m){ const now=performance.now(); const tx=+m[1];
-      if(lastT){ const mbps=((tx-lastTx)*8/1e6)/((now-lastT)/1000); lastTx=tx;lastT=now;
-        statusEl.textContent=t.split(',').slice(0,2).join(',').trim()+` | ≈${mbps.toFixed(1)} Mbps `+(t.includes('hid=up')?'| HID✓':''); }
-      else {lastTx=tx;lastT=now;}
-    } else statusEl.textContent=t.trim();
-    // stall watchdog: if the server frame counter stops advancing, reset the video
+    if(m){ const tx=+m[1]; if(lastT) mbps=((tx-lastTx)*8/1e6)/((now-lastT)/1000); lastTx=tx;lastT=now; }
     const fm=t.match(/frame (\d+)/);
-    if(fm){ const seq=+fm[1], now=performance.now();
-      if(seq!==lastFrameSeq){ lastFrameSeq=seq; lastFrameT=now; }
-      else if(autoRefresh && now-lastFrameT>4500){ lastFrameT=now; try{videoStart();}catch(_){} }
+    if(fm){ const seq=+fm[1];
+      if(prevSeq>=0){ const dt=(now-prevSeqT)/1000; if(dt>0.2) fps=(seq-prevSeq)/dt; }
+      prevSeq=seq; prevSeqT=now;
+      // stall watchdog: reset video if the frame counter stops advancing
+      if(seq!==stallSeq){ stallSeq=seq; stallT=now; }
+      else if(autoRefresh && now-stallT>4500){ stallT=now; try{videoStart();}catch(_){} }
     }
+    const res=t.split(',')[0].trim().split('@')[0].trim();
+    if(m||fm) statusEl.textContent = res
+      + (fps!=null?` | ${fps.toFixed(1)} fps`:'')
+      + (mbps!=null?` | ≈${mbps.toFixed(1)} Mbps`:'')
+      + (t.includes('hid=up')?' | HID✓':'');
+    else statusEl.textContent=t.trim();
     const pw=t.match(/pwr=(-?\d+)/),pg=t.match(/pgpio=(-?\d+)/),rg=t.match(/rgpio=(-?\d+)/),sg=t.match(/sgpio=(-?\d+)/);
     if(pw){ const v=+pw[1], d=document.getElementById('pwrdot');
       if(v===1){d.className='dot on';d.style.background='';}
