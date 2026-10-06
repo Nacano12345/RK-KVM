@@ -173,6 +173,18 @@
       <div class="muted">J4 排针：pin2=GND，pin3/4=信号(gpio22/23)，经三极管/光耦接被控机电源键/复位键。</div>
     </div>
   </details>
+  <details>
+    <summary>虚拟介质 (USB磁盘)</summary>
+    <div class="sec">
+      <div class="grp"><label>存储卡</label><span id="msdcard" class="muted">检测中…</span></div>
+      <div class="grp"><button id="msdcardBtn" class="gray">挂载存储卡</button>
+        <label style="min-width:0"><input type="checkbox" id="msdro"> 只读</label>
+        <button id="msdoff" class="gray">弹出</button></div>
+      <div class="grp"><input id="msdfile" placeholder="/userdata/xxx.iso 或 /dev/mmcblk0" style="flex:1;min-width:0"></div>
+      <div class="grp"><button id="msdfileBtn" class="gray">挂载镜像/设备</button></div>
+      <div class="muted" id="msdinfo">—</div>
+    </div>
+  </details>
 </aside>
 
 <main id="wrap">
@@ -527,6 +539,24 @@ document.getElementById('powerHold').addEventListener('click',()=>gpulse(+pgpio.
 document.getElementById('reset').addEventListener('click',()=>gpulse(+rgpio.value,500));
 document.getElementById('savecfg').addEventListener('click',()=>{ const p=+pgpio.value,r=+rgpio.value,s=+document.getElementById('sgpio').value;
   fetch(`/gpiocfg?power=${p}&reset=${r}&status=${s}`).then(r=>r.text()).then(()=>{const b=document.getElementById('savecfg');b.textContent='已保存';setTimeout(()=>b.textContent='保存',1200);}).catch(()=>{}); });
+
+// ---------- virtual media (USB mass storage) ----------
+function msdRefresh(){
+  fetch('/msd').then(r=>r.json()).then(j=>{
+    const c=document.getElementById('msdcard'); if(c) c.textContent = j.card||'未检测到';
+    const i=document.getElementById('msdinfo');
+    if(i) i.textContent = '当前: '+(j.file||'(无)')+(j.ro==='1'?' [只读]':'');
+  }).catch(()=>{});
+}
+(function(){
+  const cb=document.getElementById('msdcardBtn'), fb=document.getElementById('msdfileBtn'),
+        off=document.getElementById('msdoff'), ro=document.getElementById('msdro'), fi=document.getElementById('msdfile');
+  if(cb) cb.addEventListener('click',()=>fetch('/msd?card=1').then(msdRefresh));
+  if(fb) fb.addEventListener('click',()=>{ const f=(fi.value||'').trim(); if(f) fetch('/msd?file='+encodeURIComponent(f)).then(msdRefresh); });
+  if(off) off.addEventListener('click',()=>fetch('/msd?off=1').then(msdRefresh));
+  if(ro) ro.addEventListener('change',()=>fetch('/msd?ro='+(ro.checked?1:0)).then(msdRefresh));
+  msdRefresh();
+})();
 
 // ---------- mouse ----------
 let absX=0,absY=0,absWheel=0,dirty=false;

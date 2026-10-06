@@ -1051,6 +1051,58 @@ static int gpio_set(int n, const char *val, const char *dir)
 	return 0;
 }
 
+#include <dirent.h>
+
+#define MSD_LUN "/sys/kernel/config/usb_gadget/rkkvm/functions/mass_storage.usb0/lun.0/"
+
+static int wf(const char *path, const char *val)
+{
+	int fd = open(path, O_WRONLY);
+	if (fd < 0)
+		return -1;
+	int r = write(fd, val, strlen(val));
+	close(fd);
+	return r < 0 ? -1 : 0;
+}
+
+static int rf(const char *path, char *out, size_t n)
+{
+	int fd = open(path, O_RDONLY);
+	if (fd < 0)
+		return -1;
+	int r = read(fd, out, n - 1);
+	close(fd);
+	if (r < 0)
+		return -1;
+	out[r] = 0;
+	char *nl = strchr(out, '\n');
+	if (nl)
+		*nl = 0;
+	return 0;
+}
+
+/* find a removable block device to share (SD card etc.) */
+static void msd_find_card(char *out, size_t n)
+{
+	DIR *d = opendir("/sys/class/block");
+	out[0] = 0;
+	if (!d)
+		return;
+	struct dirent *e;
+	while ((e = readdir(d))) {
+		const char *nm = e->d_name;
+		if (nm[0] == '.')
+			continue;
+		int whole = 0;
+		if (!strncmp(nm, "mmcblk", 6) && !strchr(nm, 'p'))
+			whole = 1;
+		else if (nm[0] == 's' && nm[1] == 'd' && nm[2] && !nm[3])
+			whole = 1;
+		if (whole) { snprintf(out, n, "/dev/%s", nm); break; }
+	}
+	closedir(d);
+}
+
 static int gpio_read(int n)
 {
 	char p[128], b[8];
@@ -1064,6 +1116,52 @@ static int gpio_read(int n)
 		return -1;
 	b[r] = 0;
 	return atoi(b);
+}
+
+static void msd_serve(int c, char *req)
+{
+	char card[64];
+	msd_find_card(card, sizeof card);
+	char *q = strchr(req, '?');
+	if (q) {
+		char *p;
+		if (strstr(q, "off=1")) {
+			wf(MSD_LUN "file", "");
+		} else if (strstr(q, "card=1")) {
+			if (card[0]) {
+				FILE *pp = popen("umount /dev/mmcblk* /dev/sd* 2>/dev/null", "r");
+				if (pp)
+					pclose(pp);
+				wf(MSD_LUN "file", card);
+			}
+		} else if ((p = strstr(q, "file="))) {
+			char path[256];
+			int i = 0;
+			p += 5;
+			while (*p && *p != '&' && *p != ' ' && i < (int)sizeof path - 1)
+				path[i++] = *p++;
+			path[i] = 0;
+			url_decode(path);
+			if (path[0])
+				wf(MSD_LUN "file", path);
+		}
+		if ((p = strstr(q, "ro=")))
+			wf(MSD_LUN "ro", p[3] == '1' ? "1" : "0");
+	}
+	char cur[256] = {0}, ro[8] = {0};
+	rf(MSD_LUN "file", cur, sizeof cur);
+	rf(MSD_LUN "ro", ro, sizeof ro);
+	char body[512];
+	int bl = snprintf(body, sizeof body,
+		"{\"card\":\"%s\",\"file\":\"%s\",\"ro\":%s}",
+		card, cur, ro[0] == '1' ? "1" : "0");
+	char hdr[192];
+	int hl = snprintf(hdr, sizeof hdr,
+		"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+		"Access-Control-Allow-Origin: *\r\nContent-Length: %d\r\n"
+		"Connection: close\r\n\r\n", bl);
+	send_all(c, hdr, hl);
+	send_all(c, body, bl);
 }
 
 struct client { int fd; };
@@ -1118,7 +1216,8 @@ static void *client_thread(void *arg)
 			!strncmp(path, "/setres", 7) || !strncmp(path, "/setenc", 7) ||
 			!strncmp(path, "/gpio", 5) || !strncmp(path, "/gpiocfg", 8) ||
 			!strncmp(path, "/ws", 3) || !strncmp(path, "/vws", 4) ||
-			!strncmp(path, "/aws", 4) || !strncmp(path, "/admin/exec", 11);
+			!strncmp(path, "/aws", 4) || !strncmp(path, "/msd", 4) ||
+			!strncmp(path, "/admin/exec", 11);
 		if (is_data)
 			send_401(c);
 		else
@@ -1209,6 +1308,8 @@ static void *client_thread(void *arg)
 		send_all(c, hdr, hl);
 	} else if (!strncmp(req, "GET /admin", 10)) {
 		serve_file(c, "/userdata/admin.html", "text/html; charset=utf-8");
+	} else if (!strncmp(req, "GET /msd", 8)) {
+		msd_serve(c, req);
 	} else if (!strncmp(req, "GET /aws", 8)) {
 		ws_audio_serve(c, req);
 	} else if (!strncmp(req, "GET /vws", 8)) {

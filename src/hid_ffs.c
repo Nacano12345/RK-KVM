@@ -665,6 +665,18 @@ static int setup_gadget(void)
 		return -1;
 	}
 
+	/* USB Mass Storage (virtual media to the target); LUN backing file is
+	 * set at runtime via configfs by the video service (/msd). */
+	if (mkdir(GADGET_DIR "/functions/mass_storage.usb0", 0777) == 0 ||
+	    errno == EEXIST) {
+		symlink(GADGET_DIR "/functions/mass_storage.usb0",
+			GADGET_DIR "/configs/b.1/mass_storage.usb0");
+		write_file(GADGET_DIR "/functions/mass_storage.usb0/lun.0/removable", "1");
+		write_file(GADGET_DIR "/functions/mass_storage.usb0/lun.0/cdrom", "0");
+		write_file(GADGET_DIR "/functions/mass_storage.usb0/lun.0/ro", "0");
+		write_file(GADGET_DIR "/functions/mass_storage.usb0/lun.0/file", "");
+	}
+
 	unbind_other_udc();
 
 	mkdir(FFS_MNT, 0755);
